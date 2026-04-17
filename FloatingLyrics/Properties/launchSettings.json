@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "FloatingLyrics (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "FloatingLyrics (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

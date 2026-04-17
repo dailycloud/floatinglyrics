@@ -1,0 +1,13 @@
+.vs/
+.dotnet_cli_home/
+.nuget/
+
+**/bin/
+**/obj/
+
+*.log
+*.tmp
+*.user
+*.suo
+
+FloatingLyrics/FloatingLyrics_win-x64.zip
