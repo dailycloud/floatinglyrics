@@ -16,6 +16,10 @@
         <LangVersion>latest</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <RootNamespace>FloatingLyrics</RootNamespace>
+        <Version>1.0.1</Version>
+        <AssemblyVersion>1.0.1.0</AssemblyVersion>
+        <FileVersion>1.0.1.0</FileVersion>
+
 
         <!-- App Options -->
         <UseRidGraph>true</UseRidGraph>
