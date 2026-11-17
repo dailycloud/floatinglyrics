@@ -27,7 +27,7 @@ public sealed class AppServices : IDisposable
             nowPlayingService = new SmtcNowPlayingService();
             lyricsProvider = new CompositeLyricsProvider(
                 // Word-by-word lyrics first; the key lives in the user's local settings (or env).
-                new SpicyLyricsProvider(httpClient, ResolveSpicyLyricsKey),
+                new SpicyLyricsProvider(httpClient, ResolveSpicyLyricsKey, SpicyLyricsClientKey),
                 new LrcLibLyricsProvider(httpClient),
                 new MusixmatchLyricsProvider(httpClient),
                 new LocalLrcLyricsProvider(),

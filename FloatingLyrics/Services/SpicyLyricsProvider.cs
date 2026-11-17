@@ -16,19 +16,45 @@ namespace FloatingLyrics.Services;
 /// The API key is read at call time (settings.json or the FLOATING_LYRICS_SPICY_KEY variable),
 /// never compiled in. The API rate-limits per window; on 429 the provider rests until the reset.
 /// </summary>
-public sealed class SpicyLyricsProvider(HttpClient httpClient, Func<string?> apiKeyProvider) : ILyricsProvider
+public sealed class SpicyLyricsProvider(HttpClient httpClient, Func<string?> apiKeyProvider, string? fallbackKey = null) : ILyricsProvider
 {
     private const string BaseUrl = "https://api.spicylyrics.org/v1";
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private DateTimeOffset restUntilUtc = DateTimeOffset.MinValue;
+    private string? rejectedKey;
+    private bool keyRejectedInCall;
 
     public async Task<LyricsResult?> GetLyricsAsync(TrackInfo track, CancellationToken cancellationToken)
     {
         var key = apiKeyProvider()?.Trim();
+        if (string.IsNullOrWhiteSpace(key) || string.Equals(key, rejectedKey, StringComparison.Ordinal))
+        {
+            // A personal key that was revoked or rotated: keep working with the app's own key.
+            key = fallbackKey;
+        }
+
         if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(track.Title) || DateTimeOffset.UtcNow < restUntilUtc)
         {
             return null;
         }
+
+        keyRejectedInCall = false;
+        var result = await GetLyricsWithKeyAsync(track, key, cancellationToken);
+        if (result is null && keyRejectedInCall && !string.IsNullOrWhiteSpace(fallbackKey) &&
+            !string.Equals(key, fallbackKey, StringComparison.Ordinal))
+        {
+            DebugTrace.Write("Spicy: personal key rejected, switching to the built-in client key");
+            rejectedKey = key;
+            restUntilUtc = DateTimeOffset.MinValue;
+            keyRejectedInCall = false;
+            result = await GetLyricsWithKeyAsync(track, fallbackKey, cancellationToken);
+        }
+
+        return result;
+    }
+
+    private async Task<LyricsResult?> GetLyricsWithKeyAsync(TrackInfo track, string key, CancellationToken cancellationToken)
+    {
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(RequestTimeout);
@@ -306,6 +332,7 @@ public sealed class SpicyLyricsProvider(HttpClient httpClient, Func<string?> api
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
         {
             DebugTrace.Write($"Spicy: key rejected (HTTP {(int)response.StatusCode})");
+            keyRejectedInCall = true;
             restUntilUtc = DateTimeOffset.UtcNow.AddMinutes(10);
             return null;
         }
