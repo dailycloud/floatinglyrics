@@ -1442,7 +1442,9 @@ public sealed partial class MainPage : Page
             text.MaxWidth = double.PositiveInfinity;
             text.Width = double.NaN;
             text.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            var width = Math.Max(text.DesiredSize.Width, text.ActualWidth);
+            // DesiredSize only: ActualWidth is the last *arranged* width, which in centre mode is
+            // the fixed lane width, not the text.
+            var width = text.DesiredSize.Width;
             return double.IsFinite(width) ? width : 0;
         }
         finally
@@ -3019,14 +3021,15 @@ public sealed partial class MainPage : Page
             return 1;
         }
 
-        var desired = Math.Clamp(GetCurrentLineHeight() / Math.Max(1, GetNextLineHeight()), 1, 2.2);
+        // Lines are laid out at the next-line size; the active one is scaled to the current-line
+        // size, which may also be smaller than the next-line size.
+        var desired = Math.Clamp(GetCurrentLineHeight() / Math.Max(1, GetNextLineHeight()), 0.3, 6);
         if (desired <= 1)
         {
             return desired;
         }
 
-        item.MainText.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        var textWidth = Math.Max(item.MainText.ActualWidth, item.MainText.DesiredSize.Width);
+        var textWidth = MeasureTextBlockNaturalWidth(item.MainText);
         if (textWidth <= 1)
         {
             return desired;

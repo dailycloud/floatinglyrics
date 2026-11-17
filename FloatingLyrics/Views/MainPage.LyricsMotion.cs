@@ -263,7 +263,10 @@ public sealed partial class MainPage
     private double[] physicalItemTops = [];
 
     /// <summary>Height of the smaller background-vocal line drawn under a lead line.</summary>
-    private double GetBackgroundLineHeight() => ComputeLineHeight(ViewModel.NextLineFontSize * BackgroundLineScale) + 2;
+    // The background line grows with the active line (it is scaled with it), so reserve room for
+    // it at the larger of the two line sizes, or the scaled-up line overlaps the next one.
+    private double GetBackgroundLineHeight() =>
+        ComputeLineHeight(Math.Max(ViewModel.CurrentLineFontSize, ViewModel.NextLineFontSize) * BackgroundLineScale) + 4;
 
     /// <summary>Recomputes item positions: lines with background vocals take extra height.</summary>
     private void RecomputePhysicalItemTops()

@@ -167,7 +167,7 @@ public sealed partial class MainPage
         var margin = item.MainText.Margin;
         var basePosition = new Vector2((float)(hostOrigin.X + margin.Left), (float)(hostOrigin.Y + margin.Top));
         var bounds = layout.LayoutBounds;
-        var fontSize = (float)Math.Max(12, item.MainText.FontSize * Math.Max(1, item.Scale.ScaleX));
+        var fontSize = (float)Math.Max(12, item.MainText.FontSize * item.Scale.ScaleX);
 
         var radius = fontSize * 0.15f;
         var spacing = radius * 3.3f;
