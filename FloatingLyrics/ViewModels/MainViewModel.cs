@@ -250,6 +250,23 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     [ObservableProperty]
     private bool isPreRollActive;
 
+    /// <summary>The last line has been sung: the view moves on to a closing visualizer.</summary>
+    [ObservableProperty]
+    private bool isOutroActive;
+
+    private TimeSpan? knownTrackDuration;
+
+    private void SetOutroActive(bool value)
+    {
+        if (IsOutroActive == value)
+        {
+            return;
+        }
+
+        IsOutroActive = value;
+        LineAnimationVersion++;
+    }
+
     [ObservableProperty]
     private bool isCountdownActive;
 
@@ -1313,7 +1330,12 @@ public partial class MainViewModel : BaseViewModel, IDisposable
                 LoadTimeline(Array.Empty<LyricLine>(), snapshot.Position, providerSaysSynced: false);
             }
 
+            knownTrackDuration = snapshot.Track.Duration;
             var result = await lyricsProvider.GetLyricsAsync(snapshot.Track, disposeTokenSource.Token);
+            if (knownTrackDuration is null && result?.SourceDuration is { } sourceDuration && sourceDuration > TimeSpan.Zero)
+            {
+                knownTrackDuration = sourceDuration;
+            }
             LyricsAttribution = string.Empty;
             LyricsAttributionUrl = null;
             if (result is null)
@@ -1934,6 +1956,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     {
         if (timeline.Count == 0)
         {
+            IsOutroActive = false;
             ClearPendingLineAdvance();
             ClearPreRollState();
             PreviousLine = string.Empty;
@@ -1955,6 +1978,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         if (firstTimestamp.HasValue && adjustedPosition < firstTimestamp.Value)
         {
             ClearPendingLineAdvance();
+            IsOutroActive = false;
             var timeUntilFirstLine = firstTimestamp.Value - adjustedPosition;
             ApplyPreRollState(timeUntilFirstLine, firstTimestamp.Value);
             return;
@@ -1992,6 +2016,25 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
         ClearPendingLineAdvance();
         SetLineIndex(targetIndex, forceAnimation || wasPreRollActive);
+
+        // After the last line ends (its own end time, or an estimate for plain LRC) the view
+        // moves on to the closing visualizer like to a next line.
+        // Only when there is a real window for it: with a known track length at least a few
+        // seconds must remain after the last line; otherwise wait a moment to be sure the music
+        // goes on, so no visualizer flashes up for a split second at the very end.
+        var outro = false;
+        if (targetIndex == timeline.Count - 1 && timeline[targetIndex] is { Timestamp: { } lastStart } last)
+        {
+            var lastEnd = last.EndTime
+                ?? (last.HasWordTiming ? last.Syllables!.Max(s => s.End) : (TimeSpan?)null)
+                ?? lastStart + TimeSpan.FromSeconds(Math.Clamp(last.Text.Length * 0.075, 1.6, 5.0));
+            var sinceEnd = adjustedPosition - lastEnd;
+            outro = knownTrackDuration is { } duration && duration > lastEnd
+                ? duration - lastEnd >= TimeSpan.FromSeconds(5) && sinceEnd >= TimeSpan.FromSeconds(0.15)
+                : sinceEnd >= TimeSpan.FromSeconds(2.5);
+        }
+
+        SetOutroActive(outro);
     }
 
     private void AdvancePendingLineIndex()

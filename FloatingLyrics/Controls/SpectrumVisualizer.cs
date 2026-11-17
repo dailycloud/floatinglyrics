@@ -91,7 +91,8 @@ public sealed partial class SpectrumVisualizer : Grid
         var centerY = height * 0.5f;
         var maxHalf = Math.Max(4f, (height * 0.5f) - 14f); // headroom for the bloom
         // Room for the bloom/shadow on both sides so they are never clipped by the canvas edge.
-        var inset = Math.Min(34f, width * 0.14f);
+        // Room on each side for the round cap plus the bloom (blur ~3 sigma) and shadow.
+        var inset = Math.Min(60f, width * 0.16f);
         var usable = width - (inset * 2f);
 
         var heights = new float[pointCount];
@@ -253,7 +254,7 @@ public sealed partial class SpectrumVisualizer : Grid
         // Each end is closed by a round cap whose height is the spectrum level at that end, so
         // it is always round (never a point or a flat cut) and swells with the bass. The cap
         // width is limited by the inset (room for the bloom); a tall cap becomes an ellipse.
-        var maxCapWidth = Math.Max(2f, inset - 8f);
+        var maxCapWidth = Math.Max(2f, inset - 30f);
         var leftRadius = heights[0];
         var rightRadius = heights[n - 1];
 

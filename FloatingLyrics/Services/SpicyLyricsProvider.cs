@@ -22,6 +22,7 @@ public sealed class SpicyLyricsProvider(HttpClient httpClient, Func<string?> api
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8);
     private DateTimeOffset restUntilUtc = DateTimeOffset.MinValue;
     private string? rejectedKey;
+    private TimeSpan? matchedDuration;
     private bool keyRejectedInCall;
 
     public async Task<LyricsResult?> GetLyricsAsync(TrackInfo track, CancellationToken cancellationToken)
@@ -102,6 +103,7 @@ public sealed class SpicyLyricsProvider(HttpClient httpClient, Func<string?> api
             query.Append("&duration=").Append(duration.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
         }
 
+        matchedDuration = null;
         using var document = await GetJsonAsync(query.ToString(), key, cancellationToken);
         if (document is null ||
             !document.RootElement.TryGetProperty("Body", out var body) ||
@@ -122,6 +124,7 @@ public sealed class SpicyLyricsProvider(HttpClient httpClient, Func<string?> api
 
             if (string.Equals(GetString(result, "tier"), "exact", StringComparison.OrdinalIgnoreCase))
             {
+                matchedDuration = ReadDuration(result);
                 return id;
             }
 
@@ -132,11 +135,17 @@ public sealed class SpicyLyricsProvider(HttpClient httpClient, Func<string?> api
                 TitlesMatch(GetString(result, "title"), track.Title))
             {
                 sameLength = id;
+                matchedDuration = ReadDuration(result);
             }
         }
 
         return sameLength;
     }
+
+    private static TimeSpan? ReadDuration(JsonElement result) =>
+        result.TryGetProperty("duration", out var d) && d.ValueKind == JsonValueKind.Number && d.GetDouble() > 1
+            ? TimeSpan.FromSeconds(d.GetDouble())
+            : null;
 
     private async Task<LyricsResult?> FetchLyricsAsync(string trackId, string key, CancellationToken cancellationToken)
     {
@@ -215,6 +224,7 @@ public sealed class SpicyLyricsProvider(HttpClient httpClient, Func<string?> api
             lines,
             label,
             synced,
+            SourceDuration: matchedDuration,
             Attribution: attributionText,
             AttributionUrl: credits.Select(c => c.Url).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)) ?? "https://spicylyrics.org");
     }

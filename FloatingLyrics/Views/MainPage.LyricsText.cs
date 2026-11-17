@@ -333,6 +333,22 @@ public sealed partial class MainPage
         }
     }
 
+    /// <summary>
+    /// Width of the box the line is aligned in. Centre mode gives the text block a fixed width;
+    /// left/right modes size it to the text and position it with its margin, so the box must be
+    /// the text's own width (a huge fallback box pushed right-aligned text off screen).
+    /// </summary>
+    private static float GetTextBoxWidth(PhysicalLyricItem item)
+    {
+        if (double.IsFinite(item.MainText.Width) && item.MainText.Width > 0)
+        {
+            return (float)item.MainText.Width;
+        }
+
+        var measured = Math.Max(item.MainText.ActualWidth, item.MainText.DesiredSize.Width);
+        return (float)Math.Max(1, double.IsFinite(measured) ? Math.Ceiling(measured) + 1 : 1);
+    }
+
     /// <summary>Layout for the background-vocal line: same face/alignment, smaller size.</summary>
     private CanvasTextLayout? EnsureBackgroundLayout(ICanvasResourceCreator creator, PhysicalLyricItem item)
     {
@@ -344,9 +360,7 @@ public sealed partial class MainPage
 
         var text = line.BackgroundText!;
         var fontSize = (float)Math.Max(1, item.MainText.FontSize * BackgroundLineScale);
-        var boxWidth = double.IsFinite(item.MainText.Width) && item.MainText.Width > 0
-            ? (float)item.MainText.Width
-            : 100000f;
+        var boxWidth = GetTextBoxWidth(item);
         var alignment = item.MainText.TextAlignment;
         var key = $"{text}\u001F{fontSize}\u001F{currentLineFontFamily.Source}\u001F{lyricsFontWeight.Weight}\u001F{boxWidth}\u001F{alignment}";
         if (item.BackgroundLayout is not null && string.Equals(item.BackgroundLayoutKey, key, StringComparison.Ordinal))
@@ -388,9 +402,7 @@ public sealed partial class MainPage
         var fontSize = (float)Math.Max(1, item.MainText.FontSize);
         var family = currentLineFontFamily.Source;
         var weight = lyricsFontWeight.Weight;
-        var boxWidth = double.IsFinite(item.MainText.Width) && item.MainText.Width > 0
-            ? (float)item.MainText.Width
-            : 100000f;
+        var boxWidth = GetTextBoxWidth(item);
         var alignment = item.MainText.TextAlignment;
         var key = $"{text}\u001F{fontSize}\u001F{family}\u001F{weight}\u001F{boxWidth}\u001F{alignment}";
         if (item.TextLayout is not null && string.Equals(item.TextLayoutKey, key, StringComparison.Ordinal))

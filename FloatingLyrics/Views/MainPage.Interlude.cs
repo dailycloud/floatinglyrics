@@ -22,6 +22,13 @@ public sealed partial class MainPage
     private double interludeProgress;
     private TimeSpan interludeRemaining;
     private bool interludeActive;
+    private bool interludeIsOutro;
+
+    /// <summary>
+    /// The line the interlude replaced. It stays hidden until it is no longer the current line,
+    /// so it never fades back in while the timer fades out before the next line.
+    /// </summary>
+    private PhysicalLyricItem? interludeHiddenItem;
     private double lastInterludeFrameSeconds;
 
     /// <summary>Recomputes whether we are inside a long gap; returns true while drawing is needed.</summary>
@@ -32,6 +39,19 @@ public sealed partial class MainPage
         var now = interludeClock.Elapsed.TotalSeconds;
         var dt = Math.Clamp(now - lastInterludeFrameSeconds, 0, 0.1);
         lastInterludeFrameSeconds = now;
+        if (interludeActive && interludeAlpha > 0.5)
+        {
+            interludeHiddenItem = GetActiveLyricItem();
+        }
+
+        if (interludeHiddenItem is { } hidden &&
+            ((!ReferenceEquals(hidden, GetActiveLyricItem()) && !hidden.IsExiting) ||
+             (!interludeActive && IsLineStillSung(hidden))))
+        {
+            // Moved on, or the user seeked back into the line itself.
+            interludeHiddenItem = null;
+        }
+
         var target = interludeActive ? 1.0 : 0.0;
         interludeAlpha += (target - interludeAlpha) * Math.Min(1, dt * 7);
         if (Math.Abs(interludeAlpha - target) < 0.004)
@@ -46,6 +66,7 @@ public sealed partial class MainPage
     {
         progress = 0;
         remaining = TimeSpan.Zero;
+        interludeIsOutro = false;
         if (!physicalTrackModeActive || !ViewModel.HasSyncedTimeline || ViewModel.IsPreRollActive)
         {
             return false;
@@ -53,8 +74,14 @@ public sealed partial class MainPage
 
         var lines = ViewModel.TimelineLines;
         var index = ViewModel.ActiveLineIndex;
-        if (index < 0 || index >= lines.Count - 1)
+        if (index < 0 || index >= lines.Count)
         {
+            return false;
+        }
+
+        if (index == lines.Count - 1)
+        {
+            // After the last line the closing visualizer takes over (see the track plan).
             return false;
         }
 
@@ -87,6 +114,24 @@ public sealed partial class MainPage
         return true;
     }
 
+    private bool IsLineStillSung(PhysicalLyricItem item)
+    {
+        if (item.Line is not { Timestamp: { } start } line)
+        {
+            return false;
+        }
+
+        var end = line.EndTime
+            ?? (line.HasWordTiming ? line.Syllables!.Max(s => s.End) : (TimeSpan?)null)
+            ?? start + TimeSpan.FromSeconds(Math.Clamp(line.Text.Length * 0.075, 1.6, 5.0));
+        return ViewModel.GetInterpolatedPlaybackPosition() < end + TimeSpan.FromSeconds(0.4);
+    }
+
+    private PhysicalLyricItem? GetActiveLyricItem() =>
+        physicalLyricItems.Count == 0
+            ? null
+            : physicalLyricItems[Math.Clamp(GetActivePhysicalPlanIndex(), 0, physicalLyricItems.Count - 1)];
+
     private PhysicalLyricItem? GetInterludeItem()
     {
         if (interludeAlpha <= 0.004 || physicalLyricItems.Count == 0)
@@ -100,16 +145,20 @@ public sealed partial class MainPage
 
     /// <summary>The last sung line leaves completely while the interlude timer takes its place.</summary>
     private float GetInterludeLineFade(PhysicalLyricItem item) =>
-        ReferenceEquals(item, GetInterludeItem()) ? (float)Math.Pow(1 - interludeAlpha, 1.6) : 1f;
+        ReferenceEquals(item, interludeHiddenItem)
+            ? 0f
+            : ReferenceEquals(item, GetInterludeItem()) ? (float)Math.Pow(1 - interludeAlpha, 1.6) : 1f;
 
     /// <summary>…and shrinks toward its centre, like any outgoing line.</summary>
     private double GetInterludeLineShrink(PhysicalLyricItem item) =>
-        ReferenceEquals(item, GetInterludeItem()) ? 1 - (0.16 * interludeAlpha) : 1;
+        ReferenceEquals(item, interludeHiddenItem)
+            ? 0.84
+            : ReferenceEquals(item, GetInterludeItem()) ? 1 - (0.16 * interludeAlpha) : 1;
 
     private void DrawInterlude(CanvasControl sender, CanvasDrawingSession ds)
     {
         var item = GetInterludeItem();
-        if (item is null || lyricsTextOverlay is null || item.TextLayout is not { } layout)
+        if (interludeIsOutro || item is null || lyricsTextOverlay is null || item.TextLayout is not { } layout)
         {
             return;
         }

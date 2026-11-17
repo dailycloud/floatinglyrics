@@ -142,6 +142,7 @@ public sealed partial class MainPage : Page
     private string preRollLeadText = "• • •";
     private string physicalTrackIdentity = string.Empty;
     private Canvas? physicalTrackVisualizerCanvas;
+    private Canvas? physicalOutroVisualizerCanvas;
     private Canvas? activeVisualizerCanvas;
     private PhysicalTrackPlan activePhysicalTrackPlan = new(Array.Empty<PhysicalTrackEntry>(), 0, 0, false);
 
@@ -187,7 +188,7 @@ public sealed partial class MainPage : Page
         public required double FrequencyRatio { get; init; }
     }
 
-    private readonly record struct PhysicalTrackEntry(string Text, bool IsVisualizer, LyricLine? Line = null);
+    private readonly record struct PhysicalTrackEntry(string Text, bool IsVisualizer, LyricLine? Line = null, bool IsOutro = false);
 
     private readonly record struct PhysicalTrackPlan(
         IReadOnlyList<PhysicalTrackEntry> Entries,
@@ -441,6 +442,7 @@ public sealed partial class MainPage : Page
         LyricsTrackSurface.Children.Clear();
         activePhysicalTrackPlan = new PhysicalTrackPlan(Array.Empty<PhysicalTrackEntry>(), 0, 0, false);
         physicalTrackVisualizerCanvas = null;
+        physicalOutroVisualizerCanvas = null;
         activeVisualizerCanvas = null;
         LyricsCanvas.SizeChanged -= LyricsCanvas_OnSizeChanged;
         RootGrid.SizeChanged -= RootGrid_OnSizeChanged;
@@ -475,6 +477,12 @@ public sealed partial class MainPage : Page
             {
                 return;
             }
+        }
+
+        if (e.PropertyName == nameof(MainViewModel.IsOutroActive))
+        {
+            _ = DispatcherQueue.TryEnqueue(UpdateVisualizerState);
+            return;
         }
 
         if (e.PropertyName == nameof(MainViewModel.LineAnimationVersion))
@@ -869,6 +877,24 @@ public sealed partial class MainPage : Page
             }
         }
 
+        // Everything lives inside one container as wide as the longest line of the track.
+        var container = GetLyricsContainerWidth(textLaneRight - textLaneLeft);
+        switch (mode)
+        {
+            case LyricsTextAlignmentMode.Left:
+                textLaneRight = textLaneLeft + container;
+                break;
+            case LyricsTextAlignmentMode.Right:
+                textLaneLeft = textLaneRight - container;
+                break;
+            default:
+                var middle = (textLaneLeft + textLaneRight) / 2;
+                textLaneLeft = middle - (container / 2);
+                textLaneRight = middle + (container / 2);
+                centerLaneWidth = Math.Min(centerLaneWidth, container);
+                break;
+        }
+
         return new LyricsHorizontalLayout(mode, viewportWidth, centerLaneWidth, textLaneLeft, textLaneRight);
     }
 
@@ -1016,14 +1042,12 @@ public sealed partial class MainPage : Page
 
             // Duets: the second voice sits on the opposite side (centre stays centre).
             var itemLayout = item.Line is { IsOppositeAligned: true }
-                ? layout with
+                ? layout.Mode switch
                 {
-                    Mode = layout.Mode switch
-                    {
-                        LyricsTextAlignmentMode.Left => LyricsTextAlignmentMode.Right,
-                        LyricsTextAlignmentMode.Right => LyricsTextAlignmentMode.Left,
-                        _ => layout.Mode
-                    }
+                    // The lanes are the container, so the second voice sits at its far edge.
+                    LyricsTextAlignmentMode.Left => layout with { Mode = LyricsTextAlignmentMode.Right },
+                    LyricsTextAlignmentMode.Right => layout with { Mode = LyricsTextAlignmentMode.Left },
+                    _ => layout
                 }
                 : layout;
             ApplyTextPlacement(item.MainText, item.ShadowText, itemLayout);
@@ -1153,6 +1177,36 @@ public sealed partial class MainPage : Page
     {
         overlayGeometryTrackIdentity = string.Empty;
         cachedTrackLongestContentWidth = double.NaN;
+    }
+
+    private const double DefaultLyricsContainerWidth = 560;
+    private double lyricsContainerWidth = double.NaN;
+    private string lyricsContainerKey = string.Empty;
+
+    /// <summary>
+    /// Width of the lyrics container for the current track: the longest line at the active size
+    /// (or the title), the same for every line, the glass plate and the visualizers, so nothing
+    /// ever sticks out of the plate and the visualizer keeps one length.
+    /// </summary>
+    private double GetLyricsContainerWidth(double laneWidth)
+    {
+        var key = string.Concat(
+            BuildOverlayGeometryTrackIdentity(),
+            "|", ViewModel.CurrentLineFontSize.ToString(CultureInfo.InvariantCulture),
+            "|", ViewModel.TitleFontSize.ToString(CultureInfo.InvariantCulture),
+            "|", ((int)ViewModel.LyricsFont).ToString(CultureInfo.InvariantCulture),
+            "|", ((int)ViewModel.LyricsFontWeight).ToString(CultureInfo.InvariantCulture),
+            "|", ViewModel.CustomFontFamily ?? string.Empty);
+        if (!string.Equals(key, lyricsContainerKey, StringComparison.Ordinal) || !double.IsFinite(lyricsContainerWidth))
+        {
+            lyricsContainerKey = key;
+            var lines = MeasureTimelineLongestWidth();
+            var meta = Math.Max(MeasureTextBlockNaturalWidth(TrackTitleText) + 8, MeasureTextBlockNaturalWidth(ArtistNameText));
+            lyricsContainerWidth = Math.Max(lines > 1 ? lines : DefaultLyricsContainerWidth, meta);
+        }
+
+        laneWidth = Math.Max(1, laneWidth);
+        return Math.Clamp(lyricsContainerWidth, Math.Min(240, laneWidth), laneWidth);
     }
 
     private string BuildOverlayGeometryTrackIdentity()
@@ -2780,6 +2834,7 @@ public sealed partial class MainPage : Page
         LyricsTrackSurface.Children.Clear();
         physicalLyricItems.Clear();
         physicalTrackVisualizerCanvas = null;
+        physicalOutroVisualizerCanvas = null;
         activeVisualizerCanvas = null;
         visualizerLinesDirty = true;
         ApplyRestingLineLayerVisuals();
@@ -2928,6 +2983,10 @@ public sealed partial class MainPage : Page
             entries.Add(new PhysicalTrackEntry(line.Text, IsVisualizer: false, line));
         }
 
+        // Closing visualizer after the last line: it rises into place like a next line.
+        entries.Add(new PhysicalTrackEntry(string.Empty, IsVisualizer: true, IsOutro: true));
+        containsVisualizer = true;
+
         if (entries.Count == 0)
         {
             return new PhysicalTrackPlan(entries, ActiveIndex: 0, lineBandHeight, containsVisualizer);
@@ -2935,7 +2994,9 @@ public sealed partial class MainPage : Page
 
         var activeIndex = ViewModel.IsPreRollActive
             ? Math.Clamp(offset - 1, 0, entries.Count - 1)
-            : Math.Clamp(ViewModel.ActiveLineIndex, 0, ViewModel.TimelineLines.Count - 1) + offset;
+            : ViewModel.IsOutroActive
+                ? entries.Count - 1
+                : Math.Clamp(ViewModel.ActiveLineIndex, 0, ViewModel.TimelineLines.Count - 1) + offset;
 
         activeIndex = Math.Clamp(activeIndex, 0, entries.Count - 1);
         return new PhysicalTrackPlan(entries, activeIndex, lineBandHeight, containsVisualizer);
@@ -2971,7 +3032,8 @@ public sealed partial class MainPage : Page
             return desired;
         }
 
-        var availableWidth = Math.Max(120, LyricsCanvas.ActualWidth - 6);
+        var lanes = GetLyricsHorizontalLayout();
+        var availableWidth = Math.Max(120, lanes.TextLaneRight - lanes.TextLaneLeft);
         var maxScaleToFit = availableWidth / textWidth;
         return Math.Clamp(Math.Min(desired, maxScaleToFit), 1, desired);
     }
@@ -3049,6 +3111,7 @@ public sealed partial class MainPage : Page
         physicalLyricItems.Clear();
         LyricsTrackSurface.Children.Clear();
         physicalTrackVisualizerCanvas = null;
+        physicalOutroVisualizerCanvas = null;
         activeVisualizerCanvas = null;
 
         var plan = precomputedPlan ?? BuildPhysicalTrackPlan();
@@ -3186,7 +3249,14 @@ public sealed partial class MainPage : Page
             contentHost.Children.Add(vizCanvas);
             contentHost.Children.Add(shadowText);
             contentHost.Children.Add(mainText);
-            physicalTrackVisualizerCanvas = vizCanvas;
+            if (entry.IsOutro)
+            {
+                physicalOutroVisualizerCanvas = vizCanvas;
+            }
+            else
+            {
+                physicalTrackVisualizerCanvas = vizCanvas;
+            }
         }
         else
         {
@@ -4100,11 +4170,19 @@ public sealed partial class MainPage : Page
         var referenceIndex = physicalRenderedIndex >= 0
             ? physicalRenderedIndex
             : GetActivePhysicalPlanIndex();
-        return referenceIndex <= 1;
+        return (physicalTrackVisualizerCanvas is not null && referenceIndex <= 1) ||
+               (physicalOutroVisualizerCanvas is not null &&
+                (ViewModel.IsOutroActive || referenceIndex >= physicalLyricItems.Count - 1));
     }
 
     private Canvas ResolveVisualizerCanvas()
     {
+        if (physicalTrackModeActive && physicalOutroVisualizerCanvas is not null &&
+            (ViewModel.IsOutroActive || physicalRenderedIndex >= physicalLyricItems.Count - 1))
+        {
+            return physicalOutroVisualizerCanvas;
+        }
+
         if (physicalTrackModeActive && physicalTrackVisualizerCanvas is not null)
         {
             return physicalTrackVisualizerCanvas;
@@ -4333,16 +4411,26 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        var laneWidth = ReferenceEquals(canvas, LyricVisualizerCanvas)
-            ? Math.Max(1, LyricVisualizerHost.ActualWidth)
-            : Math.Max(1, LyricsCanvas.ActualWidth);
-        var width = Math.Clamp(laneWidth - (OverlayTextEdgePadding * 2), 160, 760);
-        var left = ResolveEffectiveLyricsTextAlignmentMode() switch
+        double width;
+        double left;
+        if (ReferenceEquals(canvas, LyricVisualizerCanvas))
         {
-            LyricsTextAlignmentMode.Center => (laneWidth - width) / 2,
-            LyricsTextAlignmentMode.Right => laneWidth - width - OverlayTextEdgePadding,
-            _ => OverlayTextEdgePadding * 0.5
-        };
+            var laneWidth = Math.Max(1, LyricVisualizerHost.ActualWidth);
+            width = Math.Clamp(laneWidth - (OverlayTextEdgePadding * 2), 160, 760);
+            left = ResolveEffectiveLyricsTextAlignmentMode() switch
+            {
+                LyricsTextAlignmentMode.Center => (laneWidth - width) / 2,
+                LyricsTextAlignmentMode.Right => laneWidth - width - OverlayTextEdgePadding,
+                _ => OverlayTextEdgePadding * 0.5
+            };
+        }
+        else
+        {
+            // Same container as the lyrics: one length at the start and at the end of a track.
+            var lanes = GetLyricsHorizontalLayout();
+            width = Math.Max(160, lanes.TextLaneRight - lanes.TextLaneLeft);
+            left = lanes.TextLaneLeft;
+        }
 
         if (Math.Abs(spectrumView.Width - width) > 0.5 || double.IsNaN(spectrumView.Width))
         {

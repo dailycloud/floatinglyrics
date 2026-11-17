@@ -1188,6 +1188,14 @@ public sealed partial class MainPage
 
     private double ResolveVisibleTextWidth(LyricsTextAlignmentMode mode, double contentWidth)
     {
+        // The plate is exactly the lyrics container (plus a little air), in every mode.
+        var lanes = GetLyricsHorizontalLayout();
+        var container = lanes.TextLaneRight - lanes.TextLaneLeft;
+        if (double.IsFinite(container) && container > 1)
+        {
+            return Math.Clamp(container + 24, Math.Min(OverlayContentMinWidth, contentWidth), Math.Max(1, contentWidth));
+        }
+
         if (mode != LyricsTextAlignmentMode.Center && double.IsFinite(cachedTrackLongestContentWidth))
         {
             return Math.Max(OverlayContentMinWidth, cachedTrackLongestContentWidth + 24);
