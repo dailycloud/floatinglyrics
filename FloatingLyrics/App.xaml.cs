@@ -60,10 +60,6 @@ public partial class App : Application
     private FileSystemWatcher? settingsWatcher;
     private MenuFlyout? trayMenuFlyout;
     private ToggleMenuFlyoutItem? trayShowTimingsItem;
-    private ToggleMenuFlyoutItem? trayAlwaysOnTopItem;
-    private ToggleMenuFlyoutItem? trayDesktopWidgetItem;
-    private ToggleMenuFlyoutItem? trayShowDragHandleItem;
-    private readonly Dictionary<WindowPositionPreset, ToggleMenuFlyoutItem> trayPresetItems = [];
     private readonly uint trayIconId = TrayIconIdBase + (uint)(Environment.ProcessId % 100000);
     private TypedEventHandler<WindowManager, TrayIconEventArgs>? trayIconContextMenuHandler;
     private TypedEventHandler<WindowManager, TrayIconEventArgs>? trayIconSelectedHandler;
@@ -194,12 +190,14 @@ public partial class App : Application
                 $"OnLaunched: modeProbe args='{args.Arguments ?? "(null)"}' cmd='{commandLine}' env='{envMode}' settingsMode={isSettingsSubprocess} forceDesktopWidget={forceDesktopWidgetOnLaunch}");
             if (isSettingsSubprocess)
             {
-                LaunchSettingsWindow();
+                // Settings now live in the glass menu on the desktop; a separate settings window
+                // is no longer used. Exit so an old shortcut does not start a second widget.
+                DebugTrace.Write("OnLaunched: --settings is obsolete, exiting");
+                Current.Exit();
+                return;
             }
-            else
-            {
-                LaunchOverlayWindow();
-            }
+
+            LaunchOverlayWindow();
         }
         catch (Exception ex)
         {
@@ -228,14 +226,10 @@ public partial class App : Application
         DebugTrace.Write("OnLaunched: creating services");
         Services = new AppServices(MainWindow);
         Services.MainViewModel.SetOverlayResizeDeferred(true);
-        if (forceDesktopWidgetOnLaunch)
-        {
-            Services.MainViewModel.DesktopWidgetMode = true;
-            Services.MainViewModel.StartInDesktopWidgetMode = true;
-            // Startup mode is applied from MainPage.OnLoaded after full XAML/UI init.
-            // Early host-attach can cause unstable behavior on some shells.
-            DebugTrace.Write("OnLaunched: forceDesktopWidget startup flag set (deferred apply)");
-        }
+        // The widget is desktop-only; the host attach itself is applied from MainPage.OnLoaded
+        // after full XAML/UI init (early host-attach can be unstable on some shells).
+        Services.MainViewModel.DesktopWidgetMode = true;
+        DebugTrace.Write($"OnLaunched: desktop widget (startup flag={forceDesktopWidgetOnLaunch}, deferred apply)");
         DebugTrace.Write("OnLaunched: creating page");
         mainPage = new MainPage(Services.MainViewModel);
         MainWindow.Content = mainPage;
@@ -269,33 +263,6 @@ public partial class App : Application
         InitializeSettingsWatcher();
         DebugTrace.Write("OnLaunched: startup state deferred to MainPage.OnLoaded");
         DebugTrace.Write("OnLaunched: done");
-    }
-
-    private void LaunchSettingsWindow()
-    {
-        MainWindow = new Window
-        {
-            Title = T(SettingsWindowTitleEn, SettingsWindowTitleRu)
-        };
-
-        Services = new AppServices(MainWindow, settingsOnlyMode: true);
-        MainWindow.Content = new SettingsPage(Services.MainViewModel);
-        MainWindow.Activate();
-        MainWindow.Closed += (_, _) => DisposeResources();
-        uiDispatcherQueue = DispatcherQueue.GetForCurrentThread();
-
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(MainWindow);
-        var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
-        var appWindow = AppWindow.GetFromWindowId(windowId);
-        ApplyWindowIcon(MainWindow, appWindow);
-        if (appWindow.Presenter is OverlappedPresenter presenter)
-        {
-            presenter.SetBorderAndTitleBar(false, false);
-            presenter.IsMaximizable = false;
-            presenter.IsMinimizable = false;
-            presenter.IsResizable = false;
-        }
-        appWindow.Resize(new SizeInt32(430, 620));
     }
 
     private static bool IsSettingsModeLaunch(string? launchArguments)
@@ -382,7 +349,6 @@ public partial class App : Application
         }
 
         trayMenuFlyout = null;
-        trayPresetItems.Clear();
         Services?.Dispose();
     }
 
@@ -448,7 +414,7 @@ public partial class App : Application
         windowManager.TrayIconId = trayIconId;
         windowManager.IsVisibleInTray = true;
 
-        trayIconSelectedHandler = (_, _) => MainWindow.Activate();
+        trayIconSelectedHandler = (_, _) => OpenSettingsFromTray();
         trayIconContextMenuHandler = (_, e) =>
         {
             SyncTrayMenuState();
@@ -460,13 +426,7 @@ public partial class App : Application
 
         mainViewModelChangedHandler = (_, e) =>
         {
-            if (e.PropertyName is not (
-                    nameof(MainViewModel.ShowLineTimings) or
-                    nameof(MainViewModel.AlwaysOnTop) or
-                    nameof(MainViewModel.AlwaysOnTopToggleEnabled) or
-                    nameof(MainViewModel.DesktopWidgetMode) or
-                    nameof(MainViewModel.ShowDragHandle) or
-                    nameof(MainViewModel.SelectedPositionPreset)))
+            if (e.PropertyName is not nameof(MainViewModel.ShowLineTimings))
             {
                 return;
             }
@@ -482,13 +442,21 @@ public partial class App : Application
         var viewModel = Services.MainViewModel;
         var flyout = new MenuFlyout();
 
-        var showOverlayItem = new MenuFlyoutItem { Text = T("Show Overlay", "Показать оверлей") };
-        showOverlayItem.Click += (_, _) => ShowOverlayFromTray();
-        flyout.Items.Add(showOverlayItem);
-
-        var openSettingsItem = new MenuFlyoutItem { Text = T("Open Settings", "Открыть настройки") };
+        var openSettingsItem = new MenuFlyoutItem
+        {
+            Text = T("Widget Settings (on desktop)", "Настройки виджета (на рабочем столе)"),
+            Icon = new FontIcon { Glyph = "" }
+        };
         openSettingsItem.Click += (_, _) => OpenSettingsFromTray();
         flyout.Items.Add(openSettingsItem);
+
+        var showOverlayItem = new MenuFlyoutItem
+        {
+            Text = T("Re-attach to Desktop", "Вернуть на рабочий стол"),
+            Icon = new FontIcon { Glyph = "" }
+        };
+        showOverlayItem.Click += (_, _) => ShowOverlayFromTray();
+        flyout.Items.Add(showOverlayItem);
 
         flyout.Items.Add(new MenuFlyoutSeparator());
 
@@ -496,31 +464,11 @@ public partial class App : Application
         trayShowTimingsItem.Click += (_, _) => viewModel.ShowLineTimings = trayShowTimingsItem.IsChecked;
         flyout.Items.Add(trayShowTimingsItem);
 
-        trayAlwaysOnTopItem = new ToggleMenuFlyoutItem { Text = T("Always On Top", "Поверх всех окон") };
-        trayAlwaysOnTopItem.Click += (_, _) => viewModel.AlwaysOnTop = trayAlwaysOnTopItem.IsChecked;
-        flyout.Items.Add(trayAlwaysOnTopItem);
-
-        trayDesktopWidgetItem = new ToggleMenuFlyoutItem { Text = T("Desktop Widget", "Виджет рабочего стола") };
-        trayDesktopWidgetItem.Click += (_, _) => viewModel.DesktopWidgetMode = trayDesktopWidgetItem.IsChecked;
-        flyout.Items.Add(trayDesktopWidgetItem);
-
-        trayShowDragHandleItem = new ToggleMenuFlyoutItem { Text = T("Show Drag Square", "Показывать drag-квадрат") };
-        trayShowDragHandleItem.Click += (_, _) => viewModel.ShowDragHandle = trayShowDragHandleItem.IsChecked;
-        flyout.Items.Add(trayShowDragHandleItem);
-
-        var presetsItem = new MenuFlyoutSubItem { Text = T("Position Preset", "Пресет позиции") };
-        foreach (var option in viewModel.PositionPresetOptions)
+        var refreshItem = new MenuFlyoutItem
         {
-            var item = new ToggleMenuFlyoutItem { Text = option.Label };
-            var preset = option.Preset;
-            item.Click += (_, _) => viewModel.ApplyPositionPreset(preset);
-            presetsItem.Items.Add(item);
-            trayPresetItems[preset] = item;
-        }
-        flyout.Items.Add(presetsItem);
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var refreshItem = new MenuFlyoutItem { Text = T("Refresh Lyrics", "Обновить текст") };
+            Text = T("Refresh Lyrics", "Обновить текст"),
+            Icon = new FontIcon { Glyph = "" }
+        };
         refreshItem.Click += (_, _) =>
         {
             if (viewModel.RefreshCommand.CanExecute(null))
@@ -529,6 +477,7 @@ public partial class App : Application
             }
         };
         flyout.Items.Add(refreshItem);
+        flyout.Items.Add(new MenuFlyoutSeparator());
 
         var exitItem = new MenuFlyoutItem { Text = T("Exit", "Выход") };
         exitItem.Click += (_, _) => Current.Exit();
@@ -544,50 +493,21 @@ public partial class App : Application
             return;
         }
 
-        var viewModel = Services.MainViewModel;
         if (trayShowTimingsItem is not null)
         {
-            trayShowTimingsItem.IsChecked = viewModel.ShowLineTimings;
-        }
-
-        if (trayAlwaysOnTopItem is not null)
-        {
-            trayAlwaysOnTopItem.IsChecked = viewModel.AlwaysOnTop;
-            trayAlwaysOnTopItem.IsEnabled = viewModel.AlwaysOnTopToggleEnabled;
-        }
-
-        if (trayDesktopWidgetItem is not null)
-        {
-            trayDesktopWidgetItem.IsChecked = viewModel.DesktopWidgetMode;
-        }
-
-        if (trayShowDragHandleItem is not null)
-        {
-            trayShowDragHandleItem.IsChecked = viewModel.ShowDragHandle;
-        }
-
-        foreach (var pair in trayPresetItems)
-        {
-            pair.Value.IsChecked = pair.Key == viewModel.SelectedPositionPreset;
+            trayShowTimingsItem.IsChecked = Services.MainViewModel.ShowLineTimings;
         }
     }
 
     private void OpenSettingsFromTray()
     {
-        if (SettingsSubprocessLauncher.TryLaunch())
-        {
-            return;
-        }
-
-        Services.MainViewModel.RestoreOverlayVisibility();
-        MainWindow.Activate();
-        mainPage?.OpenSettingsFlyoutFromTray();
+        // The menu opens next to the widget, on the desktop layer (never above other apps).
+        mainPage?.OpenSettingsPanelFromTray();
     }
 
     private void ShowOverlayFromTray()
     {
         Services.MainViewModel.RestoreOverlayVisibility();
-        MainWindow.Activate();
     }
 
     private static void ConfigureOverlayWindow(Window window, int preferredWidth)

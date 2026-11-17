@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8" ?>
+﻿<?xml version="1.0" encoding="UTF-8" ?>
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
@@ -14,17 +14,20 @@
         <!-- Project Options -->
         <Nullable>enable</Nullable>
         <LangVersion>latest</LangVersion>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <ImplicitUsings>enable</ImplicitUsings>
         <RootNamespace>FloatingLyrics</RootNamespace>
-        <Version>1.0.1</Version>
-        <AssemblyVersion>1.0.1.0</AssemblyVersion>
-        <FileVersion>1.0.1.0</FileVersion>
+        <Version>1.1.0</Version>
+        <AssemblyVersion>1.1.0.0</AssemblyVersion>
+        <FileVersion>1.1.0.0</FileVersion>
 
 
         <!-- App Options -->
         <UseRidGraph>true</UseRidGraph>
         <Platforms>x86;x64;ARM64</Platforms>
         <ApplicationManifest>app.manifest</ApplicationManifest>
+        <!-- Friends download a zip and just run it: bundle the Windows App SDK runtime too. -->
+        <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
         <ApplicationIcon Condition="Exists('Assets\\AppIcon.ico')">Assets\AppIcon.ico</ApplicationIcon>
         <PublishProfile>win-$(Platform).pubxml</PublishProfile>
         <RuntimeIdentifiers Condition="$([MSBuild]::GetTargetFrameworkVersion('$(TargetFramework)')) >= 8">win-x86;win-x64;win-arm64</RuntimeIdentifiers>
@@ -47,7 +50,16 @@
     </ItemGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.*" />
+        <!-- Precompiled Direct2D pixel shaders (rebuild with Shaders/build-shaders.ps1). -->
+        <None Remove="Shaders\**" />
+        <EmbeddedResource Include="Shaders\LiquidGlass.bin" LogicalName="FloatingLyrics.Shaders.LiquidGlass.bin" />
+        <None Include="Shaders\LiquidGlass.hlsl" />
+        <None Include="Shaders\build-shaders.ps1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.3.2" />
+        <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
         <PackageReference Include="Microsoft.Web.WebView2" Version="1.*" />
         <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.*" />
         <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />

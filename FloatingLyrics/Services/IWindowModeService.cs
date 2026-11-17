@@ -13,4 +13,10 @@ public interface IWindowModeService
     bool TryGetWorkAreaSize(out int width, out int height);
     bool TryResize(int width, int height);
     bool TryEnsureVisibleOnWorkArea();
+
+    /// <summary>
+    /// Verifies that the window is still a child of the live desktop host (and on top of the
+    /// icon layer). Re-attaches when Explorer was restarted. Returns true if a change was made.
+    /// </summary>
+    bool EnsureWallpaperAttachment();
 }

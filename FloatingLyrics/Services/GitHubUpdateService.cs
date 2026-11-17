@@ -88,7 +88,10 @@ public sealed class GitHubUpdateService(HttpClient httpClient) : IUpdateService
                     LatestVersion: latestVersion,
                     ReleaseUrl: releaseUrl,
                     ReleaseTitle: payload.Name ?? payload.TagName,
-                    PublishedAtUtc: payload.PublishedAt);
+                    PublishedAtUtc: payload.PublishedAt,
+                    AssetUrl: payload.Assets?
+                        .FirstOrDefault(a => string.Equals(a.Name, UpdateInstaller.AssetName, StringComparison.OrdinalIgnoreCase))?
+                        .DownloadUrl);
             }
 
             return new UpdateCheckResult(
@@ -159,5 +162,17 @@ public sealed class GitHubUpdateService(HttpClient httpClient) : IUpdateService
 
         [JsonPropertyName("published_at")]
         public DateTimeOffset? PublishedAt { get; set; }
+
+        [JsonPropertyName("assets")]
+        public List<GitHubAsset>? Assets { get; set; }
+    }
+
+    private sealed class GitHubAsset
+    {
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("browser_download_url")]
+        public string? DownloadUrl { get; set; }
     }
 }

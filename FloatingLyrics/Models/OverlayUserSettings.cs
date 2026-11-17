@@ -49,6 +49,26 @@ public sealed class OverlayUserSettings
     public bool AutoHideCoverOnLongLine { get; init; } = true;
     public bool CenterAlignmentShowCoverOnTop { get; init; }
     public double CenterAlignmentCoverSize { get; init; } = 92;
+    public GlassVisibilityMode GlassVisibility { get; init; } = GlassVisibilityMode.OnHover;
+    public double GlassBlur { get; init; } = 14;
+    public double GlassRefraction { get; init; } = 0.65;
+    public double GlassDispersion { get; init; } = 0.6;
+    public double GlassSpecular { get; init; } = 0.8;
+    public GlassTintPreset GlassTint { get; init; } = GlassTintPreset.Smoke;
+    public double GlassTintStrength { get; init; } = 0.32;
+    public double GlassCornerRadius { get; init; } = 30;
+    public double GlassPadding { get; init; } = 22;
+    public bool GlassCursorLight { get; init; } = true;
+    public bool UseArtworkTextColors { get; init; } = true;
+    public LyricsFontOption LyricsFont { get; init; } = LyricsFontOption.SegoeVariable;
+    public LyricsFontWeightOption LyricsFontWeight { get; init; } = LyricsFontWeightOption.Semibold;
+    public LineAnimationStyle LineAnimationStyle { get; init; } = LineAnimationStyle.Spring;
+    /// <summary>Personal Spicy Lyrics API key (local settings only, never shipped).</summary>
+    public string SpicyLyricsApiKey { get; init; } = string.Empty;
+    public string CustomFontFamily { get; init; } = string.Empty;
+    public TextContrastMode TextContrast { get; init; } = TextContrastMode.Auto;
+    public bool WordByWordHighlight { get; init; } = true;
+    public double LyricsOffsetMs { get; init; }
     public IReadOnlyList<CustomPositionPreset> CustomPositionPresets { get; init; } = [];
     public string SelectedCustomPresetId { get; init; } = string.Empty;
 }

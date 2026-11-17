@@ -4,86 +4,434 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:models="using:FloatingLyrics.Models"
+    xmlns:controls="using:FloatingLyrics.Controls"
+    xmlns:local="using:FloatingLyrics.Views"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
     Background="Transparent">
 
     <Page.Resources>
-        <Style
-            x:Key="SettingsFlyoutPresenterStyle"
-            TargetType="FlyoutPresenter">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderBrush" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="0" />
+        <!-- ============================================================ glass UI kit -->
+        <FontFamily x:Key="GlassUiFont">Segoe UI Variable Text</FontFamily>
+        <FontFamily x:Key="GlassUiDisplayFont">Segoe UI Variable Display</FontFamily>
+        <FontFamily x:Key="GlassIconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+        <SolidColorBrush x:Key="GlassTextPrimary" Color="#F7FFFFFF" />
+        <SolidColorBrush x:Key="GlassTextSecondary" Color="#B8FFFFFF" />
+        <SolidColorBrush x:Key="GlassTextTertiary" Color="#80FFFFFF" />
+        <SolidColorBrush x:Key="GlassFillSubtle" Color="#14FFFFFF" />
+        <SolidColorBrush x:Key="GlassFillHover" Color="#24FFFFFF" />
+        <SolidColorBrush x:Key="GlassFillPressed" Color="#33FFFFFF" />
+        <SolidColorBrush x:Key="GlassFillSelected" Color="#3DFFFFFF" />
+        <SolidColorBrush x:Key="GlassStroke" Color="#26FFFFFF" />
+        <SolidColorBrush x:Key="GlassStrokeStrong" Color="#59FFFFFF" />
+
+        <!-- Lightweight styling for stock controls hosted on glass. -->
+        <SolidColorBrush x:Key="SliderTrackFill" Color="#2EFFFFFF" />
+        <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="#3DFFFFFF" />
+        <SolidColorBrush x:Key="SliderTrackFillPressed" Color="#47FFFFFF" />
+        <SolidColorBrush x:Key="SliderTrackValueFill" Color="#F2FFFFFF" />
+        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="SliderThumbBackground" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="#FFEFF3F8" />
+        <SolidColorBrush x:Key="SliderOuterThumbBackground" Color="#40000000" />
+        <SolidColorBrush x:Key="SliderHeaderForeground" Color="#F7FFFFFF" />
+
+        <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#E6FFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#D9FFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FF1A1F28" />
+        <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FF1A1F28" />
+        <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FF1A1F28" />
+        <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#1FFFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#2EFFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchFillOffPressed" Color="#3DFFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="#66FFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="#99FFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOffPressed" Color="#99FFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#CCFFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPressed" Color="#FFFFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="#00FFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="#00FFFFFF" />
+        <SolidColorBrush x:Key="ToggleSwitchStrokeOnPressed" Color="#00FFFFFF" />
+
+        <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="#1AFFFFFF" />
+        <SolidColorBrush x:Key="ListViewItemBackgroundPressed" Color="#2EFFFFFF" />
+        <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#33FFFFFF" />
+        <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#40FFFFFF" />
+        <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPressed" Color="#4DFFFFFF" />
+        <SolidColorBrush x:Key="ListViewItemSelectionIndicatorBrush" Color="#FFFFFFFF" />
+
+        <Style x:Key="GlassSliderStyle" TargetType="Slider">
+            <Setter Property="IsThumbToolTipEnabled" Value="False" />
+            <Setter Property="Margin" Value="0,-4,0,-6" />
+            <Setter Property="IsFocusEngagementEnabled" Value="False" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
         </Style>
 
-        <Style
-            x:Key="SettingsSectionCardStyle"
-            TargetType="Border">
-            <Setter Property="Padding" Value="7" />
-            <Setter Property="CornerRadius" Value="7" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="BorderBrush" Value="#2C3C4E63" />
-            <Setter Property="Background" Value="#C2151C27" />
-            <Setter Property="Margin" Value="0,0,0,0" />
+        <Style x:Key="GlassToggleStyle" TargetType="ToggleSwitch">
+            <Setter Property="OnContent" Value="" />
+            <Setter Property="OffContent" Value="" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="Margin" Value="0,-6,-10,-6" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
         </Style>
 
-        <Style
-            x:Key="SettingsSectionTitleStyle"
-            TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="Segoe UI Variable Display Semibold" />
+        <Style x:Key="GlassSectionTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource GlassUiFont}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="CharacterSpacing" Value="40" />
+            <Setter Property="Foreground" Value="{StaticResource GlassTextTertiary}" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+        </Style>
+
+        <Style x:Key="GlassLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource GlassUiFont}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="{StaticResource GlassTextPrimary}" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextWrapping" Value="WrapWholeWords" />
+        </Style>
+
+        <Style x:Key="GlassValueStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource GlassUiFont}" />
             <Setter Property="FontSize" Value="12" />
-            <Setter Property="Foreground" Value="#EAF2FD" />
+            <Setter Property="Foreground" Value="{StaticResource GlassTextSecondary}" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Center" />
         </Style>
 
-        <Style
-            x:Key="SettingsSectionCaptionStyle"
-            TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
-            <Setter Property="FontSize" Value="9" />
-            <Setter Property="Foreground" Value="#7889A0" />
+        <Style x:Key="GlassCaptionStyle" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource GlassUiFont}" />
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Foreground" Value="{StaticResource GlassTextTertiary}" />
             <Setter Property="TextWrapping" Value="WrapWholeWords" />
         </Style>
 
-        <Style
-            x:Key="SettingsFieldLabelStyle"
-            TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="Segoe UI Variable Text Semibold" />
-            <Setter Property="FontSize" Value="10" />
-            <Setter Property="Foreground" Value="#D6E0F0" />
-            <Setter Property="TextWrapping" Value="WrapWholeWords" />
-        </Style>
-
-        <Style
-            x:Key="SettingsFieldCaptionStyle"
-            TargetType="TextBlock">
-            <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
-            <Setter Property="FontSize" Value="10" />
-            <Setter Property="Foreground" Value="#8394AD" />
-            <Setter Property="TextWrapping" Value="WrapWholeWords" />
-        </Style>
-
-        <Style
-            x:Key="SettingsHeaderIconButtonStyle"
-            TargetType="Button">
-            <Setter Property="Width" Value="26" />
-            <Setter Property="Height" Value="26" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="MinWidth" Value="26" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Background" Value="#1A2434" />
-            <Setter Property="BorderBrush" Value="#45607E" />
+        <!-- Grouped "card" inside the glass panel (iOS-style inset group). -->
+        <Style x:Key="GlassGroupStyle" TargetType="Border">
+            <Setter Property="Background" Value="#12FFFFFF" />
+            <Setter Property="BorderBrush" Value="#1CFFFFFF" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="#E8F2FF" />
+            <Setter Property="CornerRadius" Value="16" />
+            <Setter Property="Padding" Value="14,12" />
         </Style>
 
-        <LinearGradientBrush x:Key="DragBarBackgroundBrush" StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#9FFFFFFF" Offset="0" />
-            <GradientStop Color="#80F2F4F8" Offset="0.55" />
-            <GradientStop Color="#66E1E6EF" Offset="1" />
-        </LinearGradientBrush>
+        <Style x:Key="GlassIconButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Foreground" Value="{StaticResource GlassTextPrimary}" />
+            <Setter Property="FontFamily" Value="{StaticResource GlassIconFont}" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid x:Name="Root" Background="Transparent" RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform>
+                                <ScaleTransform x:Name="RootScale" />
+                            </Grid.RenderTransform>
+                            <Ellipse x:Name="Fill" Fill="{StaticResource GlassFillSubtle}" Stroke="{StaticResource GlassStroke}" StrokeThickness="1" />
+                            <ContentPresenter
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Content="{TemplateBinding Content}"
+                                Foreground="{TemplateBinding Foreground}"
+                                FontFamily="{TemplateBinding FontFamily}"
+                                FontSize="{TemplateBinding FontSize}" />
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualStateGroup.Transitions>
+                                        <VisualTransition GeneratedDuration="0:0:0.16" />
+                                    </VisualStateGroup.Transitions>
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Fill" Value="{StaticResource GlassFillHover}" />
+                                            <Setter Target="Fill.Stroke" Value="{StaticResource GlassStrokeStrong}" />
+                                            <Setter Target="RootScale.ScaleX" Value="1.06" />
+                                            <Setter Target="RootScale.ScaleY" Value="1.06" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Fill" Value="{StaticResource GlassFillPressed}" />
+                                            <Setter Target="RootScale.ScaleX" Value="0.92" />
+                                            <Setter Target="RootScale.ScaleY" Value="0.92" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Opacity" Value="0.4" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="GlassActionButtonStyle" TargetType="Button">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Foreground" Value="{StaticResource GlassTextPrimary}" />
+            <Setter Property="FontFamily" Value="{StaticResource GlassUiFont}" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid x:Name="Root" RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform>
+                                <ScaleTransform x:Name="RootScale" />
+                            </Grid.RenderTransform>
+                            <Border
+                                x:Name="Fill"
+                                CornerRadius="12"
+                                Background="{StaticResource GlassFillSubtle}"
+                                BorderBrush="{StaticResource GlassStroke}"
+                                BorderThickness="1" />
+                            <ContentPresenter
+                                Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Content="{TemplateBinding Content}"
+                                Foreground="{TemplateBinding Foreground}"
+                                FontFamily="{TemplateBinding FontFamily}"
+                                FontSize="{TemplateBinding FontSize}" />
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualStateGroup.Transitions>
+                                        <VisualTransition GeneratedDuration="0:0:0.14" />
+                                    </VisualStateGroup.Transitions>
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource GlassFillHover}" />
+                                            <Setter Target="Fill.BorderBrush" Value="{StaticResource GlassStrokeStrong}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Fill.Background" Value="{StaticResource GlassFillPressed}" />
+                                            <Setter Target="RootScale.ScaleX" Value="0.97" />
+                                            <Setter Target="RootScale.ScaleY" Value="0.97" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Opacity" Value="0.4" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Segmented-control chip: a RadioButton without the radio glyph. -->
+        <Style x:Key="GlassChipStyle" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{StaticResource GlassTextSecondary}" />
+            <Setter Property="FontFamily" Value="{StaticResource GlassUiFont}" />
+            <Setter Property="FontSize" Value="12.5" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid x:Name="Root" Background="Transparent" RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform>
+                                <ScaleTransform x:Name="RootScale" />
+                            </Grid.RenderTransform>
+                            <Border
+                                x:Name="Pill"
+                                CornerRadius="11"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="1" />
+                            <ContentPresenter
+                                x:Name="Presenter"
+                                Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="Center"
+                                Content="{TemplateBinding Content}"
+                                Foreground="{TemplateBinding Foreground}"
+                                FontFamily="{TemplateBinding FontFamily}"
+                                FontSize="{TemplateBinding FontSize}"
+                                TextWrapping="NoWrap" />
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualStateGroup.Transitions>
+                                        <VisualTransition GeneratedDuration="0:0:0.14" />
+                                    </VisualStateGroup.Transitions>
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Pill.Background" Value="{StaticResource GlassFillSubtle}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Pill.Background" Value="{StaticResource GlassFillHover}" />
+                                            <Setter Target="RootScale.ScaleX" Value="0.96" />
+                                            <Setter Target="RootScale.ScaleY" Value="0.96" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="Root.Opacity" Value="0.4" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                                <VisualStateGroup x:Name="CheckStates">
+                                    <VisualStateGroup.Transitions>
+                                        <VisualTransition GeneratedDuration="0:0:0.22">
+                                            <VisualTransition.GeneratedEasingFunction>
+                                                <CubicEase EasingMode="EaseOut" />
+                                            </VisualTransition.GeneratedEasingFunction>
+                                        </VisualTransition>
+                                    </VisualStateGroup.Transitions>
+                                    <VisualState x:Name="Checked">
+                                        <VisualState.Setters>
+                                            <Setter Target="Pill.Background" Value="{StaticResource GlassFillSelected}" />
+                                            <Setter Target="Pill.BorderBrush" Value="{StaticResource GlassStrokeStrong}" />
+                                            <Setter Target="Presenter.Foreground" Value="#FFFFFFFF" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Unchecked" />
+                                    <VisualState x:Name="Indeterminate" />
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Round colour swatch; the swatch colour comes from Background. -->
+        <Style x:Key="GlassSwatchStyle" TargetType="RadioButton">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid x:Name="Root" Background="Transparent" RenderTransformOrigin="0.5,0.5">
+                            <Grid.RenderTransform>
+                                <ScaleTransform x:Name="RootScale" />
+                            </Grid.RenderTransform>
+                            <Ellipse x:Name="Ring" Stroke="#00FFFFFF" StrokeThickness="2" />
+                            <Ellipse Margin="4" Fill="{TemplateBinding Background}" Stroke="#40FFFFFF" StrokeThickness="1" />
+                            <Ellipse Margin="4" Opacity="0.55">
+                                <Ellipse.Fill>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Offset="0" Color="#66FFFFFF" />
+                                        <GradientStop Offset="0.5" Color="#00FFFFFF" />
+                                    </LinearGradientBrush>
+                                </Ellipse.Fill>
+                            </Ellipse>
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualStateGroup.Transitions>
+                                        <VisualTransition GeneratedDuration="0:0:0.14" />
+                                    </VisualStateGroup.Transitions>
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootScale.ScaleX" Value="1.1" />
+                                            <Setter Target="RootScale.ScaleY" Value="1.1" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootScale.ScaleX" Value="0.92" />
+                                            <Setter Target="RootScale.ScaleY" Value="0.92" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled" />
+                                </VisualStateGroup>
+                                <VisualStateGroup x:Name="CheckStates">
+                                    <VisualStateGroup.Transitions>
+                                        <VisualTransition GeneratedDuration="0:0:0.2" />
+                                    </VisualStateGroup.Transitions>
+                                    <VisualState x:Name="Checked">
+                                        <VisualState.Setters>
+                                            <Setter Target="Ring.Stroke" Value="#F2FFFFFF" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Unchecked" />
+                                    <VisualState x:Name="Indeterminate" />
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="GlassTabStyle" TargetType="RadioButton" BasedOn="{StaticResource GlassChipStyle}">
+            <Setter Property="Padding" Value="4,7,4,6" />
+            <Setter Property="FontSize" Value="11" />
+        </Style>
+
+        <Style x:Key="GlassSegmentHostStyle" TargetType="Border">
+            <Setter Property="Background" Value="#14000000" />
+            <Setter Property="BorderBrush" Value="#1AFFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="13" />
+            <Setter Property="Padding" Value="2" />
+        </Style>
+
+        <!-- Anchor picker cell (3x3 position grid). -->
+        <Style x:Key="GlassAnchorButtonStyle" TargetType="Button">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid x:Name="Root" Background="Transparent">
+                            <Border x:Name="Cell" CornerRadius="7" Background="#10FFFFFF" BorderBrush="#1CFFFFFF" BorderThickness="1" />
+                            <Ellipse x:Name="Dot" Width="6" Height="6" Fill="#99FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualStateGroup.Transitions>
+                                        <VisualTransition GeneratedDuration="0:0:0.12" />
+                                    </VisualStateGroup.Transitions>
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="Cell.Background" Value="#24FFFFFF" />
+                                            <Setter Target="Dot.Fill" Value="#FFFFFFFF" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="Cell.Background" Value="#3DFFFFFF" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled" />
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
 
         <Storyboard x:Key="WaitingDotsStoryboard" RepeatBehavior="Forever">
             <DoubleAnimationUsingKeyFrames
@@ -217,14 +565,14 @@
             <Canvas x:Name="DragSnapGridCanvas" />
             <Border
                 x:Name="DragSnapHint"
-                Margin="0,12,0,0"
-                Padding="10,5"
+                Margin="0,18,0,0"
+                Padding="14,7"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Top"
-                CornerRadius="8"
-                BorderBrush="#44FFFFFF"
+                CornerRadius="16"
+                BorderBrush="#40FFFFFF"
                 BorderThickness="1"
-                Background="#78101010">
+                Background="#8C0E1118">
                 <TextBlock
                     x:Name="DragSnapHintText"
                     FontFamily="Segoe UI Variable Text"
@@ -234,831 +582,84 @@
             </Border>
         </Grid>
 
-        <StackPanel
+        <!--
+            The widget. The whole surface is draggable (LMB) and opens the glass menu (RMB).
+            GlassPlateLayer hosts the liquid-glass plate that materialises behind the lyrics on hover.
+        -->
+        <Grid
             x:Name="OverlayRootHost"
             Margin="32,32,32,32"
             HorizontalAlignment="Left"
             VerticalAlignment="Top"
+            Background="Transparent"
             SizeChanged="OverlayRootHost_OnSizeChanged"
-            Spacing="6">
-            <StackPanel.RenderTransform>
+            PointerPressed="DragHandle_OnPointerPressed"
+            PointerMoved="DragHandle_OnPointerMoved"
+            PointerReleased="DragHandle_OnPointerReleased"
+            PointerCanceled="DragHandle_OnPointerCanceled"
+            PointerCaptureLost="DragHandle_OnPointerCaptureLost">
+            <Grid.RenderTransform>
                 <TranslateTransform x:Name="OverlayRootHostTranslate" />
-            </StackPanel.RenderTransform>
+            </Grid.RenderTransform>
 
+            <Canvas
+                x:Name="GlassPlateLayer"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top">
+                <controls:LiquidGlassSurface x:Name="GlassPlate" />
+                <Border
+                    x:Name="GlassPlateHitArea"
+                    Background="Transparent"
+                    Width="0"
+                    Height="0" />
+                <StackPanel
+                    x:Name="EmptyStatePlaceholder"
+                    Orientation="Horizontal"
+                    Spacing="12"
+                    Opacity="0"
+                    IsHitTestVisible="False">
+                    <Grid Width="40" Height="40">
+                        <Ellipse Fill="#1FFFFFFF" Stroke="#33FFFFFF" StrokeThickness="1" />
+                        <FontIcon
+                            Glyph="&#xE8D6;"
+                            FontSize="17"
+                            Foreground="#E6FFFFFF" />
+                    </Grid>
+                    <StackPanel VerticalAlignment="Center" Spacing="1">
+                        <TextBlock
+                            FontFamily="Segoe UI Variable Display"
+                            FontWeight="SemiBold"
+                            FontSize="16"
+                            Foreground="#F2FFFFFF"
+                            Text="Сейчас ничего не играет" />
+                        <TextBlock
+                            FontFamily="Segoe UI Variable Text"
+                            FontSize="12"
+                            Foreground="#99FFFFFF"
+                            Text="Включите музыку — текст появится здесь" />
+                    </StackPanel>
+                </StackPanel>
+            </Canvas>
+
+            <StackPanel
+                x:Name="OverlayContentStack"
+                Spacing="6">
             <Grid
                 x:Name="DragHandleSlot"
                 Height="14"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Top">
+                <!-- Sheet-style grabber; fades in together with the glass plate. -->
                 <Border
                     x:Name="DragHandle"
                     Width="196"
-                    Height="14"
+                    Height="5"
+                    Opacity="0"
                     Visibility="{x:Bind ViewModel.DragHandleVisibility, Mode=OneWay}"
-                    Background="{StaticResource DragBarBackgroundBrush}"
-                    BorderBrush="#80FFFFFF"
-                    BorderThickness="1"
-                    CornerRadius="9"
+                    Background="#B3FFFFFF"
+                    CornerRadius="3"
                     HorizontalAlignment="Center"
-                    PointerCanceled="DragHandle_OnPointerCanceled"
-                    PointerCaptureLost="DragHandle_OnPointerCaptureLost"
-                    PointerMoved="DragHandle_OnPointerMoved"
-                    PointerPressed="DragHandle_OnPointerPressed"
-                    PointerReleased="DragHandle_OnPointerReleased">
-                    <Grid>
-                        <Rectangle
-                            RadiusX="9"
-                            RadiusY="9"
-                            Fill="#12FFFFFF" />
-                        <StackPanel
-                            Orientation="Horizontal"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Spacing="6"
-                            Opacity="0.3">
-                            <Ellipse Width="2" Height="2" Fill="#E8FFFFFF" />
-                            <Ellipse Width="2" Height="2" Fill="#AAFFFFFF" />
-                            <Ellipse Width="2" Height="2" Fill="#D2FFFFFF" />
-                            <Ellipse Width="2" Height="2" Fill="#96FFFFFF" />
-                            <Ellipse Width="2" Height="2" Fill="#C8FFFFFF" />
-                            <Ellipse Width="2" Height="2" Fill="#A8FFFFFF" />
-                            <Ellipse Width="2" Height="2" Fill="#DCFFFFFF" />
-                            <Ellipse Width="2" Height="2" Fill="#98FFFFFF" />
-                            <Ellipse Width="2" Height="2" Fill="#C0FFFFFF" />
-                            <Ellipse Width="2" Height="2" Fill="#8CFFFFFF" />
-                            <Ellipse Width="2" Height="2" Fill="#DAFFFFFF" />
-                        </StackPanel>
-                    </Grid>
-                    <ToolTipService.ToolTip>
-                        <TextBlock Text="LMB: move overlay content, RMB: settings." />
-                    </ToolTipService.ToolTip>
-                    <Border.ContextFlyout>
-                    <Flyout
-                        ShouldConstrainToRootBounds="False"
-                        FlyoutPresenterStyle="{StaticResource SettingsFlyoutPresenterStyle}">
-                        <Border
-                            x:Name="SettingsFlyoutRoot"
-                            Width="276"
-                            MaxHeight="460"
-                            Padding="6"
-                            CornerRadius="9"
-                            BorderThickness="1"
-                            BorderBrush="#4A5E78">
-                            <Border.Background>
-                                <SolidColorBrush Color="#F10E131B" />
-                            </Border.Background>
-                            <Border.Resources>
-                                <Style TargetType="Button">
-                                    <Setter Property="Background" Value="#1A2433" />
-                                    <Setter Property="BorderBrush" Value="#354B63" />
-                                    <Setter Property="BorderThickness" Value="1" />
-                                    <Setter Property="CornerRadius" Value="6" />
-                                    <Setter Property="Foreground" Value="#EAF2FF" />
-                                    <Setter Property="Padding" Value="8,4" />
-                                    <Setter Property="FontSize" Value="11" />
-                                    <Setter Property="MinHeight" Value="26" />
-                                </Style>
-                            </Border.Resources>
-                            <Border.RenderTransform>
-                                <TranslateTransform x:Name="SettingsFlyoutDragTransform" />
-                            </Border.RenderTransform>
-                            <Border.Shadow>
-                                <ThemeShadow />
-                            </Border.Shadow>
-                            <Grid RowSpacing="6">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                </Grid.RowDefinitions>
-
-                                <Grid
-                                    x:Name="SettingsFlyoutHeader"
-                                    Padding="2,0,2,1"
-                                    ColumnSpacing="6"
-                                    PointerPressed="SettingsFlyoutHeader_OnPointerPressed"
-                                    PointerMoved="SettingsFlyoutHeader_OnPointerMoved"
-                                    PointerReleased="SettingsFlyoutHeader_OnPointerReleased"
-                                    PointerCanceled="SettingsFlyoutHeader_OnPointerReleased"
-                                    PointerCaptureLost="SettingsFlyoutHeader_OnPointerReleased">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-
-                                    <Border
-                                        Grid.Row="0"
-                                        Grid.ColumnSpan="2"
-                                        Height="4"
-                                        Margin="0,1,0,4"
-                                        HorizontalAlignment="Stretch"
-                                        CornerRadius="2.5"
-                                        Background="#202D3C"
-                                        BorderBrush="#445A73"
-                                        BorderThickness="1" />
-
-                                    <TextBlock
-                                        Grid.Row="1"
-                                        VerticalAlignment="Center"
-                                        Foreground="#8A9DB6"
-                                        FontSize="10"
-                                        Text=" " />
-
-                                    <Button
-                                        Grid.Row="1"
-                                        Grid.Column="1"
-                                        Margin="0,0,4,0"
-                                        VerticalAlignment="Top"
-                                        Style="{StaticResource SettingsHeaderIconButtonStyle}"
-                                        Click="SettingsRefreshButton_OnClick"
-                                        ToolTipService.ToolTip="Refresh">
-                                        <FontIcon Glyph="&#xE72C;" FontSize="13" />
-                                    </Button>
-
-                                    <Button
-                                        Grid.Row="1"
-                                        Grid.Column="1"
-                                        VerticalAlignment="Top"
-                                        HorizontalAlignment="Right"
-                                        Style="{StaticResource SettingsHeaderIconButtonStyle}"
-                                        Click="CloseSettingsButton_OnClick"
-                                        ToolTipService.ToolTip="Close">
-                                        <FontIcon Glyph="&#xE711;" FontSize="13" />
-                                    </Button>
-                                </Grid>
-
-                                <ScrollViewer
-                                    Grid.Row="1"
-                                    Margin="0,0,0,0"
-                                    VerticalScrollMode="Enabled"
-                                    VerticalScrollBarVisibility="Auto">
-                                    <StackPanel Spacing="8">
-                                        <Border Style="{StaticResource SettingsSectionCardStyle}">
-                                            <StackPanel Spacing="6">
-                                                <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Playback &amp; Window" />
-                                                <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="Widget mode, pause behavior and startup." />
-                                                <CheckBox Content="Desktop widget mode" IsChecked="{x:Bind ViewModel.DesktopWidgetMode, Mode=TwoWay}" />
-                                                <CheckBox Content="Show drag-bar" IsChecked="{x:Bind ViewModel.ShowDragHandle, Mode=TwoWay}" />
-                                                <CheckBox Content="Always on top" IsChecked="{x:Bind ViewModel.AlwaysOnTop, Mode=TwoWay}" IsEnabled="{x:Bind ViewModel.AlwaysOnTopToggleEnabled, Mode=OneWay}" />
-                                                <CheckBox Content="Hide overlay on pause" IsChecked="{x:Bind ViewModel.HideOnPause, Mode=TwoWay}" />
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Pause hide delay" />
-                                                    <Slider Minimum="1" Maximum="20" StepFrequency="0.5" Value="{x:Bind ViewModel.PauseHideDelaySeconds, Mode=TwoWay}" />
-                                                    <TextBlock Style="{StaticResource SettingsFieldCaptionStyle}" Text="{x:Bind ViewModel.PauseHideDelayText, Mode=OneWay}" />
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Overlay width" />
-                                                    <Slider Minimum="360" Maximum="1720" StepFrequency="4" Value="{x:Bind ViewModel.OverlayWidth, Mode=TwoWay}" />
-                                                </StackPanel>
-                                                <CheckBox Content="Run at Windows startup" IsChecked="{x:Bind ViewModel.RunAtStartup, Mode=TwoWay}" />
-                                                <CheckBox Content="Start in desktop-widget mode" IsChecked="{x:Bind ViewModel.StartInDesktopWidgetMode, Mode=TwoWay}" />
-                                            </StackPanel>
-                                        </Border>
-
-                                        <Border Style="{StaticResource SettingsSectionCardStyle}">
-                                            <StackPanel Spacing="6">
-                                                <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Lyrics Motion" />
-                                                <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="Text alignment and line animation." />
-                                                <CheckBox Content="Show line timings" IsChecked="{x:Bind ViewModel.ShowLineTimings, Mode=TwoWay}" />
-                                                <CheckBox Content="Show cover art" IsChecked="{x:Bind ViewModel.ShowCoverArt, Mode=TwoWay}" />
-                                                <CheckBox Content="Auto text alignment" IsChecked="{x:Bind ViewModel.AutoLyricsTextAlignment, Mode=TwoWay}" />
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Manual text alignment" />
-                                                    <ComboBox
-                                                        ItemsSource="{x:Bind ViewModel.LyricsTextAlignmentOptions, Mode=OneWay}"
-                                                        SelectedValuePath="Mode"
-                                                        SelectedValue="{x:Bind ViewModel.LyricsTextAlignment, Mode=OneWay}"
-                                                        SelectionChanged="ManualLyricsAlignmentComboBox_OnSelectionChanged">
-                                                        <ComboBox.ItemTemplate>
-                                                            <DataTemplate x:DataType="models:LyricsTextAlignmentOption">
-                                                                <TextBlock Text="{x:Bind Label}" />
-                                                            </DataTemplate>
-                                                        </ComboBox.ItemTemplate>
-                                                    </ComboBox>
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Line transition duration" />
-                                                    <Slider Minimum="0.12" Maximum="1.2" StepFrequency="0.01" Value="{x:Bind ViewModel.LineAnimationDurationSeconds, Mode=TwoWay}" />
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Current line font size" />
-                                                    <Slider Minimum="20" Maximum="84" StepFrequency="1" Value="{x:Bind ViewModel.CurrentLineFontSize, Mode=TwoWay}" />
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Next line font size" />
-                                                    <Slider Minimum="16" Maximum="54" StepFrequency="1" Value="{x:Bind ViewModel.NextLineFontSize, Mode=TwoWay}" />
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Gap between lines" />
-                                                    <Slider Minimum="0" Maximum="48" StepFrequency="1" Value="{x:Bind ViewModel.NextLineTopMargin, Mode=TwoWay}" />
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </Border>
-
-                                        <Border Style="{StaticResource SettingsSectionCardStyle}">
-                                            <StackPanel Spacing="6">
-                                                <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Oscilloscope" />
-                                                <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="FFT response and mirror mode." />
-                                                <CheckBox Content="Mirror bars" IsChecked="{x:Bind ViewModel.OscilloscopeMirrorBars, Mode=TwoWay}" />
-                                                <CheckBox Content="App-scoped capture (beta)" IsChecked="{x:Bind ViewModel.AppScopedAudioCapture, Mode=TwoWay}" />
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Responsiveness" />
-                                                    <Slider Minimum="0.08" Maximum="0.95" StepFrequency="0.01" Value="{x:Bind ViewModel.OscilloscopeResponsiveness, Mode=TwoWay}" />
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Sensitivity" />
-                                                    <Slider Minimum="0.5" Maximum="2.6" StepFrequency="0.01" Value="{x:Bind ViewModel.OscilloscopeSensitivity, Mode=TwoWay}" />
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Detail (segments)" />
-                                                    <Slider Minimum="96" Maximum="320" StepFrequency="2" Value="{x:Bind ViewModel.OscilloscopeDetail, Mode=TwoWay}" />
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </Border>
-
-                                        <Border Style="{StaticResource SettingsSectionCardStyle}">
-                                            <StackPanel Spacing="6">
-                                                <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Layout &amp; Presets" />
-                                                <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="Position presets and color mode." />
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Lyrics color preset" />
-                                                    <ComboBox
-                                                        ItemsSource="{x:Bind ViewModel.LyricsColorPresetOptions, Mode=OneWay}"
-                                                        SelectedValuePath="Preset"
-                                                        SelectedValue="{x:Bind ViewModel.LyricsColorPreset, Mode=TwoWay}">
-                                                        <ComboBox.ItemTemplate>
-                                                            <DataTemplate x:DataType="models:LyricsColorPresetOption">
-                                                                <TextBlock Text="{x:Bind Label}" />
-                                                            </DataTemplate>
-                                                        </ComboBox.ItemTemplate>
-                                                    </ComboBox>
-                                                </StackPanel>
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Position preset" />
-                                                    <ComboBox
-                                                        ItemsSource="{x:Bind ViewModel.PositionPresetOptions, Mode=OneWay}"
-                                                        SelectedValuePath="Preset"
-                                                        SelectedValue="{x:Bind ViewModel.SelectedPositionPreset, Mode=TwoWay}">
-                                                        <ComboBox.ItemTemplate>
-                                                            <DataTemplate x:DataType="models:PositionPresetOption">
-                                                                <TextBlock Text="{x:Bind Label}" />
-                                                            </DataTemplate>
-                                                        </ComboBox.ItemTemplate>
-                                                    </ComboBox>
-                                                </StackPanel>
-                                                <Grid ColumnSpacing="6">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBox
-                                                        Grid.Column="0"
-                                                        PlaceholderText="Custom preset name"
-                                                        Text="{x:Bind ViewModel.CustomPresetName, Mode=TwoWay}" />
-                                                    <Button
-                                                        Grid.Column="1"
-                                                        Click="SaveCustomPresetButton_OnClick"
-                                                        Content="Save" />
-                                                </Grid>
-                                                <ComboBox
-                                                    Visibility="{x:Bind ViewModel.CustomPresetsVisibility, Mode=OneWay}"
-                                                    ItemsSource="{x:Bind ViewModel.CustomPositionPresets, Mode=OneWay}"
-                                                    SelectedItem="{x:Bind ViewModel.SelectedCustomPositionPreset, Mode=TwoWay}">
-                                                    <ComboBox.ItemTemplate>
-                                                        <DataTemplate x:DataType="models:CustomPositionPreset">
-                                                            <TextBlock Text="{x:Bind Name}" />
-                                                        </DataTemplate>
-                                                    </ComboBox.ItemTemplate>
-                                                </ComboBox>
-                                            </StackPanel>
-                                        </Border>
-
-                                        <Border Style="{StaticResource SettingsSectionCardStyle}">
-                                            <StackPanel Spacing="6">
-                                                <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Tools &amp; Debug" />
-                                                <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="Diagnostics and files." />
-                                                <CheckBox Content="Debug hitboxes" IsChecked="{x:Bind ViewModel.ShowDebugHitboxes, Mode=TwoWay}" />
-                                                <CheckBox Content="Runtime debug panel" IsChecked="{x:Bind ViewModel.ShowRuntimeDebugPanel, Mode=TwoWay}" />
-                                                <StackPanel Spacing="3">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Click-through mode" />
-                                                    <ComboBox
-                                                        ItemsSource="{x:Bind ViewModel.ClickThroughModeOptions, Mode=OneWay}"
-                                                        SelectedValuePath="Mode"
-                                                        SelectedValue="{x:Bind ViewModel.ClickThroughMode, Mode=TwoWay}">
-                                                        <ComboBox.ItemTemplate>
-                                                            <DataTemplate x:DataType="models:ClickThroughModeOption">
-                                                                <TextBlock Text="{x:Bind Label}" />
-                                                            </DataTemplate>
-                                                        </ComboBox.ItemTemplate>
-                                                    </ComboBox>
-                                                </StackPanel>
-                                                <StackPanel Spacing="2">
-                                                    <TextBlock Style="{StaticResource SettingsFieldLabelStyle}" Text="Updater" />
-                                                    <TextBlock Style="{StaticResource SettingsFieldCaptionStyle}" Text="{x:Bind ViewModel.AppVersionText, Mode=OneWay}" />
-                                                    <TextBlock Style="{StaticResource SettingsFieldCaptionStyle}" Text="{x:Bind ViewModel.UpdateRepositoryText, Mode=OneWay}" />
-                                                    <TextBlock Style="{StaticResource SettingsFieldCaptionStyle}" Text="{x:Bind ViewModel.UpdateStatusText, Mode=OneWay}" />
-                                                    <TextBlock Style="{StaticResource SettingsFieldCaptionStyle}" Text="{x:Bind ViewModel.UpdateLastCheckedText, Mode=OneWay}" />
-                                                </StackPanel>
-                                                <Grid ColumnSpacing="6">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="*" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <Button Grid.Column="0" Click="CheckForUpdatesButton_OnClick" Content="Check updates" />
-                                                    <Button Grid.Column="1" Click="OpenReleasesButton_OnClick" Content="Open releases" />
-                                                </Grid>
-                                                <Grid ColumnSpacing="6">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="*" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <Button Grid.Column="0" Click="OpenConfigFolderButton_OnClick" Content="Config folder" />
-                                                    <Button Grid.Column="1" Click="OpenConfigFileButton_OnClick" Content="settings.json" />
-                                                </Grid>
-                                                <Grid ColumnSpacing="6">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="*" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <Button Grid.Column="0" Click="OpenLogsFolderButton_OnClick" Content="Logs folder" />
-                                                    <Button Grid.Column="1" Click="ExportDebugSnapshotButton_OnClick" Content="Snapshot" />
-                                                </Grid>
-                                                <Button Click="ResetAllSettingsButton_OnClick" Content="Reset defaults" />
-                                            </StackPanel>
-                                        </Border>
-                                    </StackPanel>
-
-                                    <!-- Legacy expanded settings layout (disabled on purpose).
-                                         Keep here only as backup while compact layout is active. -->
-                                    <!--<StackPanel Spacing="6" Visibility="Collapsed">
-                                        <StackPanel Spacing="2">
-                                            <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Playback" />
-                                            <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="Session visibility, widget mode and startup behavior." />
-                                        </StackPanel>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Show timings" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.ShowLineTimings, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Debug hitboxes" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.ShowDebugHitboxes, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Runtime debug panel" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.ShowRuntimeDebugPanel, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Always on top" />
-                                            <ToggleSwitch Grid.Column="1" IsEnabled="{x:Bind ViewModel.AlwaysOnTopToggleEnabled, Mode=OneWay}" IsOn="{x:Bind ViewModel.AlwaysOnTop, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Desktop widget" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.DesktopWidgetMode, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Show drag bar" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.ShowDragHandle, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Start in desktop widget mode" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.StartInDesktopWidgetMode, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Run at Windows startup" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.RunAtStartup, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Hide overlay on pause" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.HideOnPause, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Hide after pause (seconds)" />
-                                            <Slider Minimum="1" Maximum="20" StepFrequency="0.5" Value="{x:Bind ViewModel.PauseHideDelaySeconds, Mode=TwoWay}" />
-                                            <TextBlock
-                                                Style="{StaticResource SettingsSectionCaptionStyle}"
-                                                Text="{x:Bind ViewModel.PauseHideDelayText, Mode=OneWay}" />
-                                        </StackPanel>
-
-                                        <Border
-                                            Height="1"
-                                            Margin="0,4,0,2"
-                                            Background="#22FFFFFF" />
-
-                                        <StackPanel Spacing="2">
-                                            <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Interaction" />
-                                            <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="Mouse behavior and diagnostic tools." />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Click-through mode" />
-                                            <ComboBox
-                                                ItemsSource="{x:Bind ViewModel.ClickThroughModeOptions, Mode=OneWay}"
-                                                SelectedValuePath="Mode"
-                                                SelectedValue="{x:Bind ViewModel.ClickThroughMode, Mode=TwoWay}">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="models:ClickThroughModeOption">
-                                                        <TextBlock Text="{x:Bind Label}" />
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                        </StackPanel>
-
-                                        <Border
-                                            Height="1"
-                                            Margin="0,4,0,2"
-                                            Background="#22FFFFFF" />
-
-                                        <StackPanel Spacing="2">
-                                            <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Appearance" />
-                                            <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="Color, motion and typography tuning for the overlay." />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Lyrics color" />
-                                            <ComboBox
-                                                ItemsSource="{x:Bind ViewModel.LyricsColorPresetOptions, Mode=OneWay}"
-                                                SelectedValuePath="Preset"
-                                                SelectedValue="{x:Bind ViewModel.LyricsColorPreset, Mode=TwoWay}">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="models:LyricsColorPresetOption">
-                                                        <TextBlock Text="{x:Bind Label}" />
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                        </StackPanel>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Show cover art" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.ShowCoverArt, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Auto text alignment" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.AutoLyricsTextAlignment, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Manual text alignment" />
-                                            <ComboBox
-                                                x:Name="ManualLyricsAlignmentComboBox"
-                                                ItemsSource="{x:Bind ViewModel.LyricsTextAlignmentOptions, Mode=OneWay}"
-                                                SelectedValuePath="Mode"
-                                                SelectedValue="{x:Bind ViewModel.LyricsTextAlignment, Mode=OneWay}"
-                                                SelectionChanged="ManualLyricsAlignmentComboBox_OnSelectionChanged">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="models:LyricsTextAlignmentOption">
-                                                        <TextBlock Text="{x:Bind Label}" />
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                        </StackPanel>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Center mode: show cover on top" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.CenterAlignmentShowCoverOnTop, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Center top cover size" />
-                                            <Slider Minimum="56" Maximum="240" StepFrequency="1" Value="{x:Bind ViewModel.CenterAlignmentCoverSize, Mode=TwoWay}" />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Overlay window size" />
-                                            <TextBlock
-                                                Foreground="#B8FFFFFF"
-                                                FontSize="12"
-                                                Text="Full monitor mode is enabled. Window automatically matches screen size."
-                                                TextWrapping="WrapWholeWords" />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Line transition seconds" />
-                                            <Slider Minimum="0.12" Maximum="1.2" StepFrequency="0.01" Value="{x:Bind ViewModel.LineAnimationDurationSeconds, Mode=TwoWay}" />
-                                        </StackPanel>
-
-                                        <Border
-                                            Padding="10"
-                                            Background="#22141414"
-                                            BorderBrush="#44FFFFFF"
-                                            BorderThickness="1"
-                                            CornerRadius="12">
-                                            <StackPanel Spacing="8">
-                                                <TextBlock
-                                                    FontFamily="Segoe UI Variable Display Semibold"
-                                                    FontSize="15"
-                                                    Foreground="White"
-                                                    Text="Oscilloscope" />
-                                                <TextBlock
-                                                    FontSize="12"
-                                                    Foreground="#CCFFFFFF"
-                                                    Text="Real-time response tuning" />
-
-                                                <StackPanel Spacing="4">
-                                                    <TextBlock Foreground="#F0FFFFFF" Text="Responsiveness" />
-                                                    <Slider Minimum="0.08" Maximum="0.95" StepFrequency="0.01" Value="{x:Bind ViewModel.OscilloscopeResponsiveness, Mode=TwoWay}" />
-                                                </StackPanel>
-
-                                                <StackPanel Spacing="4">
-                                                    <TextBlock Foreground="#F0FFFFFF" Text="Sensitivity" />
-                                                    <Slider Minimum="0.5" Maximum="2.6" StepFrequency="0.01" Value="{x:Bind ViewModel.OscilloscopeSensitivity, Mode=TwoWay}" />
-                                                </StackPanel>
-
-                                                <StackPanel Spacing="4">
-                                                    <TextBlock Foreground="#F0FFFFFF" Text="Peak color hold" />
-                                                    <Slider Minimum="0.65" Maximum="0.99" StepFrequency="0.01" Value="{x:Bind ViewModel.OscilloscopePeakDecay, Mode=TwoWay}" />
-                                                </StackPanel>
-
-                                                <StackPanel Spacing="4">
-                                                    <TextBlock Foreground="#F0FFFFFF" Text="Peak color intensity" />
-                                                    <Slider Minimum="0" Maximum="1" StepFrequency="0.01" Value="{x:Bind ViewModel.OscilloscopeColorIntensity, Mode=TwoWay}" />
-                                                </StackPanel>
-
-                                                <StackPanel Spacing="4">
-                                                    <TextBlock Foreground="#F0FFFFFF" Text="Detail (segments)" />
-                                                    <Slider Minimum="96" Maximum="320" StepFrequency="2" Value="{x:Bind ViewModel.OscilloscopeDetail, Mode=TwoWay}" />
-                                                </StackPanel>
-
-                                                <StackPanel Spacing="4">
-                                                    <TextBlock Foreground="#F0FFFFFF" Text="Low-frequency detail" />
-                                                    <Slider Minimum="0" Maximum="1" StepFrequency="0.01" Value="{x:Bind ViewModel.OscilloscopeLowFrequencyFocus, Mode=TwoWay}" />
-                                                </StackPanel>
-
-                                                <Grid ColumnSpacing="10">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Mirror bars (recommended for center mode)" />
-                                                    <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.OscilloscopeMirrorBars, Mode=TwoWay}" />
-                                                </Grid>
-
-                                                <Grid ColumnSpacing="10">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Capture only active app (beta)" />
-                                                    <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.AppScopedAudioCapture, Mode=TwoWay}" />
-                                                </Grid>
-                                            </StackPanel>
-                                        </Border>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Title font size" />
-                                            <Slider Minimum="16" Maximum="54" StepFrequency="1" Value="{x:Bind ViewModel.TitleFontSize, Mode=TwoWay}" />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Artist font size" />
-                                            <Slider Minimum="12" Maximum="32" StepFrequency="1" Value="{x:Bind ViewModel.ArtistFontSize, Mode=TwoWay}" />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Current line font size" />
-                                            <Slider Minimum="20" Maximum="84" StepFrequency="1" Value="{x:Bind ViewModel.CurrentLineFontSize, Mode=TwoWay}" />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Next line font size" />
-                                            <Slider Minimum="16" Maximum="54" StepFrequency="1" Value="{x:Bind ViewModel.NextLineFontSize, Mode=TwoWay}" />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Next line top spacing" />
-                                            <Slider Minimum="0" Maximum="48" StepFrequency="1" Value="{x:Bind ViewModel.NextLineTopMargin, Mode=TwoWay}" />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Edge fade zone" />
-                                            <Slider Minimum="0" Maximum="180" StepFrequency="1" Value="{x:Bind ViewModel.ViewportFadeZone, Mode=TwoWay}" />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Edge fade softness" />
-                                            <Slider Minimum="0.4" Maximum="2.2" StepFrequency="0.01" Value="{x:Bind ViewModel.ViewportFadeSoftness, Mode=TwoWay}" />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Text shadow opacity" />
-                                            <Slider Minimum="0.05" Maximum="1.0" StepFrequency="0.01" Value="{x:Bind ViewModel.TextShadowOpacity, Mode=TwoWay}" />
-                                        </StackPanel>
-
-                                        <Grid ColumnSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Foreground="#F0FFFFFF" Text="Auto-hide cover on long lines" />
-                                            <ToggleSwitch Grid.Column="1" IsOn="{x:Bind ViewModel.AutoHideCoverOnLongLine, Mode=TwoWay}" />
-                                        </Grid>
-
-                                        <Border
-                                            Height="1"
-                                            Margin="0,4,0,2"
-                                            Background="#22FFFFFF" />
-
-                                        <StackPanel Spacing="2">
-                                            <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Layout" />
-                                            <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="Overlay width and saved screen positions." />
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="4">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Position preset" />
-                                            <ComboBox
-                                                ItemsSource="{x:Bind ViewModel.PositionPresetOptions, Mode=OneWay}"
-                                                SelectedValuePath="Preset"
-                                                SelectedValue="{x:Bind ViewModel.SelectedPositionPreset, Mode=TwoWay}">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="models:PositionPresetOption">
-                                                        <TextBlock Text="{x:Bind Label}" />
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                        </StackPanel>
-
-                                        <StackPanel Spacing="6">
-                                            <TextBlock Foreground="#F0FFFFFF" Text="Custom position presets" />
-                                            <Grid ColumnSpacing="8">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBox
-                                                    Grid.Column="0"
-                                                    PlaceholderText="Preset name"
-                                                    Text="{x:Bind ViewModel.CustomPresetName, Mode=TwoWay}" />
-                                                <Button
-                                                    Grid.Column="1"
-                                                    Click="SaveCustomPresetButton_OnClick"
-                                                    Content="Save current" />
-                                            </Grid>
-                                            <ComboBox
-                                                Visibility="{x:Bind ViewModel.CustomPresetsVisibility, Mode=OneWay}"
-                                                ItemsSource="{x:Bind ViewModel.CustomPositionPresets, Mode=OneWay}"
-                                                SelectedItem="{x:Bind ViewModel.SelectedCustomPositionPreset, Mode=TwoWay}">
-                                                <ComboBox.ItemTemplate>
-                                                    <DataTemplate x:DataType="models:CustomPositionPreset">
-                                                        <TextBlock Text="{x:Bind Name}" />
-                                                    </DataTemplate>
-                                                </ComboBox.ItemTemplate>
-                                            </ComboBox>
-                                            <Button
-                                                HorizontalAlignment="Left"
-                                                Visibility="{x:Bind ViewModel.CustomPresetsVisibility, Mode=OneWay}"
-                                                Click="RemoveCustomPresetButton_OnClick"
-                                                Content="Remove selected preset" />
-                                        </StackPanel>
-
-                                        <Border
-                                            Height="1"
-                                            Margin="0,4,0,2"
-                                            Background="#22FFFFFF" />
-
-                                        <StackPanel Spacing="2">
-                                            <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Config" />
-                                            <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="Local settings storage and quick access." />
-                                        </StackPanel>
-
-                                        <Border
-                                            Padding="10"
-                                            CornerRadius="12"
-                                            Background="#22141414"
-                                            BorderBrush="#36FFFFFF"
-                                            BorderThickness="1">
-                                            <StackPanel Spacing="8">
-                                                <TextBlock
-                                                    Foreground="#F0FFFFFF"
-                                                    FontFamily="Segoe UI Variable Text Semibold"
-                                                    Text="Settings file" />
-                                                <TextBlock
-                                                    Foreground="#C8FFFFFF"
-                                                    FontSize="12"
-                                                    Text="{x:Bind ViewModel.SettingsFilePath, Mode=OneWay}"
-                                                    TextWrapping="WrapWholeWords" />
-                                                <Button
-                                                    HorizontalAlignment="Left"
-                                                    Click="OpenConfigFolderButton_OnClick"
-                                                    Content="Open config folder" />
-                                                <StackPanel
-                                                    Orientation="Horizontal"
-                                                    Spacing="8">
-                                                    <Button
-                                                        Click="OpenConfigFileButton_OnClick"
-                                                        Content="Open settings.json" />
-                                                    <Button
-                                                        Click="ResetAllSettingsButton_OnClick"
-                                                        Content="Reset defaults" />
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </Border>
-
-                                        <Border
-                                            Height="1"
-                                            Margin="0,4,0,2"
-                                            Background="#22FFFFFF" />
-
-                                        <StackPanel Spacing="2">
-                                            <TextBlock Style="{StaticResource SettingsSectionTitleStyle}" Text="Diagnostics" />
-                                            <TextBlock Style="{StaticResource SettingsSectionCaptionStyle}" Text="Logs, traces and full debug snapshots." />
-                                        </StackPanel>
-
-                                        <Border
-                                            Padding="10"
-                                            CornerRadius="12"
-                                            Background="#22141414"
-                                            BorderBrush="#36FFFFFF"
-                                            BorderThickness="1">
-                                            <StackPanel Spacing="8">
-                                                <TextBlock
-                                                    Foreground="#F0FFFFFF"
-                                                    FontFamily="Segoe UI Variable Text Semibold"
-                                                    Text="startup-trace.log" />
-                                                <TextBlock
-                                                    Foreground="#C8FFFFFF"
-                                                    FontSize="12"
-                                                    Text="{x:Bind ViewModel.StartupTraceFilePath, Mode=OneWay}"
-                                                    TextWrapping="WrapWholeWords" />
-                                                <StackPanel
-                                                    Orientation="Horizontal"
-                                                    Spacing="8">
-                                                    <Button
-                                                        Click="OpenLogsFolderButton_OnClick"
-                                                        Content="Open logs folder" />
-                                                    <Button
-                                                        Click="ExportDebugSnapshotButton_OnClick"
-                                                        Content="Export debug snapshot" />
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </Border>
-                                    </StackPanel>-->
-                                </ScrollViewer>
-                            </Grid>
-                        </Border>
-                    </Flyout>
-                    </Border.ContextFlyout>
-                </Border>
+                    VerticalAlignment="Center" />
             </Grid>
 
             <Grid
@@ -1129,14 +730,18 @@
                         Spacing="8"
                         VerticalAlignment="Center"
                         HorizontalAlignment="Left">
-                        <TextBlock
-                            x:Name="TrackTitleText"
-                            FontFamily="Bahnschrift SemiBold"
-                            FontSize="{x:Bind ViewModel.TitleFontSize, Mode=OneWay}"
-                            Foreground="{x:Bind ViewModel.TrackTitleBrush, Mode=OneWay}"
-                            Text="{x:Bind ViewModel.TrackTitleDisplay, Mode=OneWay}"
-                            TextTrimming="None"
-                            TextWrapping="NoWrap" />
+                        <Grid>
+                            <!-- Composition halo (text-masked drop shadow) for contrast on busy wallpapers. -->
+                            <Canvas x:Name="TitleHaloHost" IsHitTestVisible="False" />
+                            <TextBlock
+                                x:Name="TrackTitleText"
+                                FontFamily="Bahnschrift SemiBold"
+                                FontSize="{x:Bind ViewModel.TitleFontSize, Mode=OneWay}"
+                                Foreground="{x:Bind ViewModel.TrackTitleBrush, Mode=OneWay}"
+                                Text="{x:Bind ViewModel.TrackTitleDisplay, Mode=OneWay}"
+                                TextTrimming="None"
+                                TextWrapping="NoWrap" />
+                        </Grid>
 
                         <Viewbox
                             Width="19"
@@ -1173,14 +778,17 @@
                         </Viewbox>
                     </StackPanel>
 
-                    <TextBlock
-                        x:Name="ArtistNameText"
-                        Visibility="{x:Bind ViewModel.ArtistNameVisibility, Mode=OneWay}"
-                        FontFamily="Segoe UI Variable Text"
-                        FontSize="{x:Bind ViewModel.ArtistFontSize, Mode=OneWay}"
-                        Foreground="{x:Bind ViewModel.ArtistBrush, Mode=OneWay}"
-                        Text="{x:Bind ViewModel.ArtistName, Mode=OneWay}"
-                        TextTrimming="None" />
+                    <Grid>
+                        <Canvas x:Name="ArtistHaloHost" IsHitTestVisible="False" />
+                        <TextBlock
+                            x:Name="ArtistNameText"
+                            Visibility="{x:Bind ViewModel.ArtistNameVisibility, Mode=OneWay}"
+                            FontFamily="Segoe UI Variable Text"
+                            FontSize="{x:Bind ViewModel.ArtistFontSize, Mode=OneWay}"
+                            Foreground="{x:Bind ViewModel.ArtistBrush, Mode=OneWay}"
+                            Text="{x:Bind ViewModel.ArtistName, Mode=OneWay}"
+                            TextTrimming="None" />
+                    </Grid>
                 </StackPanel>
             </Grid>
 
@@ -1534,7 +1142,695 @@
                     </Grid>
                 </StackPanel>
             </Grid>
-        </StackPanel>
+            </StackPanel>
+
+            <!-- Hover toolbar: small glass capsule above the plate's top-right corner. -->
+            <Canvas
+                x:Name="ToolbarLayer"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top">
+                <Grid
+                    x:Name="WidgetToolbar"
+                    Opacity="0"
+                    Visibility="Collapsed"
+                    RenderTransformOrigin="1,1">
+                    <Grid.RenderTransform>
+                        <ScaleTransform x:Name="WidgetToolbarScale" />
+                    </Grid.RenderTransform>
+                    <controls:LiquidGlassSurface
+                        x:Name="ToolbarGlass"
+                        Margin="-44"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Top" />
+                    <StackPanel
+                        x:Name="WidgetToolbarButtons"
+                        Orientation="Horizontal"
+                        Padding="6"
+                        Spacing="4">
+                        <Button
+                            x:Name="ToolbarRefreshButton"
+                            Style="{StaticResource GlassIconButtonStyle}"
+                            Click="SettingsRefreshButton_OnClick"
+                            AutomationProperties.Name="Обновить текст"
+                            Content="&#xE72C;" />
+                        <Button
+                            x:Name="ToolbarSettingsButton"
+                            Style="{StaticResource GlassIconButtonStyle}"
+                            Click="ToolbarSettingsButton_OnClick"
+                            AutomationProperties.Name="Настройки"
+                            Content="&#xE713;" />
+                    </StackPanel>
+                </Grid>
+            </Canvas>
+        </Grid>
+
+        <!-- ================================================================ glass menu -->
+        <Canvas
+            x:Name="SettingsLayer"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top">
+            <Grid
+                x:Name="SettingsPanel"
+                Width="372"
+                Height="600"
+                Visibility="Collapsed"
+                Opacity="0"
+                RenderTransformOrigin="0,0">
+                <Grid.RenderTransform>
+                    <CompositeTransform x:Name="SettingsPanelTransform" />
+                </Grid.RenderTransform>
+
+                <controls:LiquidGlassSurface
+                    x:Name="SettingsGlass"
+                    Margin="-44"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top" />
+
+                <Grid
+                    x:Name="SettingsPanelContent"
+                    Padding="16,14,16,12"
+                    RowSpacing="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Header -->
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Border
+                            Width="40"
+                            Height="40"
+                            CornerRadius="11"
+                            BorderBrush="#40FFFFFF"
+                            BorderThickness="1">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Offset="0" Color="#55FFFFFF" />
+                                    <GradientStop Offset="1" Color="#14FFFFFF" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <Grid>
+                                <Rectangle RadiusX="10" RadiusY="10">
+                                    <Rectangle.Fill>
+                                        <ImageBrush ImageSource="{x:Bind ViewModel.CoverArtImage, Mode=OneWay}" Stretch="UniformToFill" />
+                                    </Rectangle.Fill>
+                                </Rectangle>
+                            </Grid>
+                        </Border>
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="0">
+                            <TextBlock
+                                FontFamily="{StaticResource GlassUiDisplayFont}"
+                                FontSize="17"
+                                FontWeight="SemiBold"
+                                Foreground="{StaticResource GlassTextPrimary}"
+                                Text="Floating Lyrics" />
+                            <TextBlock
+                                FontFamily="{StaticResource GlassUiFont}"
+                                FontSize="12"
+                                Foreground="{StaticResource GlassTextSecondary}"
+                                MaxLines="1"
+                                TextTrimming="CharacterEllipsis"
+                                Text="{x:Bind local:MainPage.FormatNowPlaying(ViewModel.TrackTitle, ViewModel.ArtistName), Mode=OneWay}" />
+                        </StackPanel>
+                        <Button
+                            Grid.Column="2"
+                            Width="30"
+                            Height="30"
+                            FontSize="11"
+                            Style="{StaticResource GlassIconButtonStyle}"
+                            Click="CloseSettingsButton_OnClick"
+                            AutomationProperties.Name="Закрыть"
+                            Content="&#xE711;" />
+                    </Grid>
+
+                    <!-- Tabs -->
+                    <Border Grid.Row="1" Style="{StaticResource GlassSegmentHostStyle}">
+                        <Grid x:Name="SettingsTabs" ColumnSpacing="2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <RadioButton x:Name="FirstSettingsTab" Grid.Column="0" GroupName="SettingsTab" Tag="0" Style="{StaticResource GlassTabStyle}" Checked="SettingsTab_OnChecked">
+                                <StackPanel Spacing="3">
+                                    <FontIcon Glyph="&#xE790;" FontSize="15" />
+                                    <TextBlock Text="Стекло" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton Grid.Column="1" GroupName="SettingsTab" Tag="1" Style="{StaticResource GlassTabStyle}" Checked="SettingsTab_OnChecked">
+                                <StackPanel Spacing="3">
+                                    <FontIcon Glyph="&#xE8D2;" FontSize="15" />
+                                    <TextBlock Text="Текст" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton Grid.Column="2" GroupName="SettingsTab" Tag="2" Style="{StaticResource GlassTabStyle}" Checked="SettingsTab_OnChecked">
+                                <StackPanel Spacing="3">
+                                    <FontIcon Glyph="&#xE768;" FontSize="15" />
+                                    <TextBlock Text="Движение" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton Grid.Column="3" GroupName="SettingsTab" Tag="3" Style="{StaticResource GlassTabStyle}" Checked="SettingsTab_OnChecked">
+                                <StackPanel Spacing="3">
+                                    <FontIcon Glyph="&#xE7F4;" FontSize="15" />
+                                    <TextBlock Text="Виджет" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton Grid.Column="4" GroupName="SettingsTab" Tag="4" Style="{StaticResource GlassTabStyle}" Checked="SettingsTab_OnChecked">
+                                <StackPanel Spacing="3">
+                                    <FontIcon Glyph="&#xE712;" FontSize="15" />
+                                    <TextBlock Text="Ещё" HorizontalAlignment="Center" />
+                                </StackPanel>
+                            </RadioButton>
+                        </Grid>
+                    </Border>
+
+                    <ScrollViewer
+                        x:Name="SettingsScroll"
+                        Grid.Row="2"
+                        Margin="-6,0,-10,0"
+                        Padding="6,0,10,0"
+                        VerticalScrollBarVisibility="Hidden"
+                        VerticalScrollMode="Enabled"
+                        HorizontalScrollMode="Disabled"
+                        ZoomMode="Disabled">
+                        <Grid x:Name="SettingsPages">
+
+                            <!-- ============================== Page 0: Glass -->
+                            <StackPanel x:Name="SettingsPageGlass" Spacing="8">
+                                <TextBlock Style="{StaticResource GlassSectionTitleStyle}" Text="ПОДЛОЖКА" />
+                                <Border Style="{StaticResource GlassSegmentHostStyle}">
+                                    <Grid x:Name="GlassVisibilityChoices" ColumnSpacing="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <RadioButton Grid.Column="0" GroupName="GlassVisibility" Tag="OnHover" Content="При наведении" Style="{StaticResource GlassChipStyle}" />
+                                        <RadioButton Grid.Column="1" GroupName="GlassVisibility" Tag="Always" Content="Всегда" Style="{StaticResource GlassChipStyle}" />
+                                        <RadioButton Grid.Column="2" GroupName="GlassVisibility" Tag="Hidden" Content="Скрыта" Style="{StaticResource GlassChipStyle}" />
+                                    </Grid>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="МАТЕРИАЛ" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="10">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Размытие" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatNumber(ViewModel.GlassBlur), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0" Maximum="40" StepFrequency="0.5" Value="{x:Bind ViewModel.GlassBlur, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Преломление" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatPercent(ViewModel.GlassRefraction), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0" Maximum="1" StepFrequency="0.01" Value="{x:Bind ViewModel.GlassRefraction, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Дисперсия" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatPercent(ViewModel.GlassDispersion), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0" Maximum="1" StepFrequency="0.01" Value="{x:Bind ViewModel.GlassDispersion, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Блики" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatPercent(ViewModel.GlassSpecular), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0" Maximum="1" StepFrequency="0.01" Value="{x:Bind ViewModel.GlassSpecular, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Свет за курсором" />
+                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.GlassCursorLight, Mode=TwoWay}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="ТОНИРОВКА" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="10">
+                                        <StackPanel x:Name="GlassTintChoices" Orientation="Horizontal" Spacing="8">
+                                            <RadioButton GroupName="GlassTint" Tag="Clear" Background="#33FFFFFF" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Прозрачная" />
+                                            <RadioButton GroupName="GlassTint" Tag="Smoke" Background="#FF1A1E27" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Дымчатая" />
+                                            <RadioButton GroupName="GlassTint" Tag="Frost" Background="#FFEEF2F8" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Иней" />
+                                            <RadioButton x:Name="ArtworkTintSwatch" GroupName="GlassTint" Tag="Artwork" Background="#FF79B7F4" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Цвет обложки" />
+                                            <RadioButton GroupName="GlassTint" Tag="Ocean" Background="#FF1F5FA8" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Океан" />
+                                            <RadioButton GroupName="GlassTint" Tag="Rose" Background="#FFB03A78" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Роза" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="GlassTintCaption" Style="{StaticResource GlassCaptionStyle}" Text="Дымчатая" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Плотность" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatPercent(ViewModel.GlassTintStrength), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0" Maximum="0.9" StepFrequency="0.01" Value="{x:Bind ViewModel.GlassTintStrength, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="ФОРМА" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="10">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Скругление" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatNumber(ViewModel.GlassCornerRadius), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="8" Maximum="56" StepFrequency="1" Value="{x:Bind ViewModel.GlassCornerRadius, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Отступы" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatNumber(ViewModel.GlassPadding), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="8" Maximum="56" StepFrequency="1" Value="{x:Bind ViewModel.GlassPadding, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ============================== Page 1: Text -->
+                            <StackPanel x:Name="SettingsPageText" Spacing="8" Visibility="Collapsed">
+                                <TextBlock Style="{StaticResource GlassSectionTitleStyle}" Text="ЦВЕТ" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="10">
+                                        <StackPanel x:Name="LyricsColorChoices" Orientation="Horizontal" Spacing="8">
+                                            <RadioButton GroupName="LyricsColor" Tag="ClassicWhite" Background="#FFFFFFFF" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Белый" />
+                                            <RadioButton GroupName="LyricsColor" Tag="WarmAmber" Background="#FFF4BE78" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Янтарь" />
+                                            <RadioButton GroupName="LyricsColor" Tag="IceBlue" Background="#FFB3DAF6" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Лёд" />
+                                            <RadioButton GroupName="LyricsColor" Tag="Mint" Background="#FFA0ECD4" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Мята" />
+                                        </StackPanel>
+                                        <Grid>
+                                            <StackPanel Margin="0,0,60,0">
+                                                <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Цвета из обложки" />
+                                                <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="Подстраивать оттенок под альбом" />
+                                            </StackPanel>
+                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.UseArtworkTextColors, Mode=TwoWay}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="КОНТРАСТ" />
+                                <Border Style="{StaticResource GlassSegmentHostStyle}">
+                                    <Grid x:Name="TextContrastChoices" ColumnSpacing="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <RadioButton Grid.Column="0" GroupName="TextContrast" Tag="Auto" Content="Авто" Style="{StaticResource GlassChipStyle}" />
+                                        <RadioButton Grid.Column="1" GroupName="TextContrast" Tag="Light" Content="Светлый" Style="{StaticResource GlassChipStyle}" />
+                                        <RadioButton Grid.Column="2" GroupName="TextContrast" Tag="Dark" Content="Тёмный" Style="{StaticResource GlassChipStyle}" />
+                                        <RadioButton Grid.Column="3" GroupName="TextContrast" Tag="Invert" Content="Инверсия" Style="{StaticResource GlassChipStyle}" />
+                                    </Grid>
+                                </Border>
+                                <TextBlock
+                                    Margin="6,0,6,0"
+                                    Style="{StaticResource GlassCaptionStyle}"
+                                    Text="Авто подбирает светлый или тёмный текст по обоям. Инверсия красит каждую часть буквы: белым над тёмным, чёрным над светлым." />
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="ШРИФТ" />
+                                <Border Style="{StaticResource GlassGroupStyle}" Padding="8">
+                                    <StackPanel Spacing="8">
+                                        <Grid x:Name="LyricsFontChoices" ColumnSpacing="4" RowSpacing="4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <RadioButton Grid.Row="0" Grid.Column="0" GroupName="LyricsFont" Tag="SegoeVariable" Style="{StaticResource GlassChipStyle}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Аа" FontSize="20" FontFamily="Segoe UI Variable Text" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="Segoe" FontSize="11" HorizontalAlignment="Center" />
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton Grid.Row="0" Grid.Column="1" GroupName="LyricsFont" Tag="SegoeDisplay" Style="{StaticResource GlassChipStyle}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Аа" FontSize="20" FontFamily="Segoe UI Variable Display" FontWeight="Bold" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="Display" FontSize="11" HorizontalAlignment="Center" />
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton Grid.Row="0" Grid.Column="2" GroupName="LyricsFont" Tag="Bahnschrift" Style="{StaticResource GlassChipStyle}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Аа" FontSize="20" FontFamily="Bahnschrift" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="Bahnschrift" FontSize="11" HorizontalAlignment="Center" />
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton Grid.Row="1" Grid.Column="0" GroupName="LyricsFont" Tag="Georgia" Style="{StaticResource GlassChipStyle}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Аа" FontSize="20" FontFamily="Georgia" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="Georgia" FontSize="11" HorizontalAlignment="Center" />
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton Grid.Row="1" Grid.Column="1" GroupName="LyricsFont" Tag="Consolas" Style="{StaticResource GlassChipStyle}">
+                                                <StackPanel>
+                                                    <TextBlock Text="Аа" FontSize="20" FontFamily="Cascadia Mono, Consolas" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="Mono" FontSize="11" HorizontalAlignment="Center" />
+                                                </StackPanel>
+                                            </RadioButton>
+                                        </Grid>
+                                        <Border Style="{StaticResource GlassSegmentHostStyle}">
+                                            <Grid x:Name="LyricsWeightChoices" ColumnSpacing="2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <RadioButton Grid.Column="0" GroupName="LyricsWeight" Tag="Light" Content="Тонкий" FontWeight="Light" Style="{StaticResource GlassChipStyle}" />
+                                                <RadioButton Grid.Column="1" GroupName="LyricsWeight" Tag="Regular" Content="Обычный" Style="{StaticResource GlassChipStyle}" />
+                                                <RadioButton Grid.Column="2" GroupName="LyricsWeight" Tag="Semibold" Content="Плотный" FontWeight="SemiBold" Style="{StaticResource GlassChipStyle}" />
+                                                <RadioButton Grid.Column="3" GroupName="LyricsWeight" Tag="Bold" Content="Жирный" FontWeight="Bold" Style="{StaticResource GlassChipStyle}" />
+                                            </Grid>
+                                        </Border>
+                                        <Grid Margin="6,4,6,0">
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Свой шрифт" />
+                                            <TextBlock x:Name="CustomFontValue" Style="{StaticResource GlassValueStyle}" MaxWidth="180" TextTrimming="CharacterEllipsis" Text="не выбран" />
+                                        </Grid>
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button Style="{StaticResource GlassActionButtonStyle}" Click="ToggleFontListButton_OnClick" Content="Выбрать шрифт" />
+                                            <Button Grid.Column="1" Style="{StaticResource GlassActionButtonStyle}" Click="LoadFontFileButton_OnClick" Content="Из файла…" />
+                                        </Grid>
+                                        <TextBlock
+                                            x:Name="FontHint"
+                                            Margin="6,0"
+                                            Visibility="Collapsed"
+                                            FontSize="12"
+                                            Foreground="#B3FFFFFF"
+                                            TextWrapping="Wrap" />
+                                        <ListView
+                                            x:Name="FontList"
+                                            Height="240"
+                                            Visibility="Collapsed"
+                                            SelectionMode="Single"
+                                            IsItemClickEnabled="True"
+                                            ItemClick="FontList_OnItemClick">
+                                            <ListView.ItemTemplate>
+                                                <DataTemplate x:DataType="local:FontChoice">
+                                                    <TextBlock
+                                                        Padding="2,6"
+                                                        FontSize="16"
+                                                        Foreground="#F2FFFFFF"
+                                                        FontFamily="{x:Bind Family}"
+                                                        Text="{x:Bind Name}" />
+                                                </DataTemplate>
+                                            </ListView.ItemTemplate>
+                                        </ListView>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="ВЫРАВНИВАНИЕ" />
+                                <Border Style="{StaticResource GlassSegmentHostStyle}">
+                                    <Grid x:Name="LyricsAlignmentChoices" ColumnSpacing="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <RadioButton Grid.Column="0" GroupName="LyricsAlignment" Tag="Auto" Content="Авто" Style="{StaticResource GlassChipStyle}" />
+                                        <RadioButton Grid.Column="1" GroupName="LyricsAlignment" Tag="Left" Content="Слева" Style="{StaticResource GlassChipStyle}" />
+                                        <RadioButton Grid.Column="2" GroupName="LyricsAlignment" Tag="Center" Content="Центр" Style="{StaticResource GlassChipStyle}" />
+                                        <RadioButton Grid.Column="3" GroupName="LyricsAlignment" Tag="Right" Content="Справа" Style="{StaticResource GlassChipStyle}" />
+                                    </Grid>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="РАЗМЕРЫ" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="10">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Текущая строка" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatNumber(ViewModel.CurrentLineFontSize), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="20" Maximum="84" StepFrequency="1" Value="{x:Bind ViewModel.CurrentLineFontSize, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Следующая строка" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatNumber(ViewModel.NextLineFontSize), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="16" Maximum="54" StepFrequency="1" Value="{x:Bind ViewModel.NextLineFontSize, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Название трека" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatNumber(ViewModel.TitleFontSize), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="16" Maximum="54" StepFrequency="1" Value="{x:Bind ViewModel.TitleFontSize, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Интервал строк" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatNumber(ViewModel.NextLineTopMargin), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0" Maximum="48" StepFrequency="1" Value="{x:Bind ViewModel.NextLineTopMargin, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Тень текста" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatPercent(ViewModel.TextShadowOpacity), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0.05" Maximum="1" StepFrequency="0.01" Value="{x:Bind ViewModel.TextShadowOpacity, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Margin="0,8,0,0" Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="12">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Тайминги строк" />
+                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.ShowLineTimings, Mode=TwoWay}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ============================== Page 2: Motion -->
+                            <StackPanel x:Name="SettingsPageMotion" Spacing="8" Visibility="Collapsed">
+                                <TextBlock Style="{StaticResource GlassSectionTitleStyle}" Text="ПО СЛОВАМ" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <Grid>
+                                        <StackPanel Margin="0,0,60,0">
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Подсветка по словам" />
+                                            <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="{x:Bind local:MainPage.FormatSpicyStatus(ViewModel.HasSpicyLyricsKey), Mode=OneWay}" />
+                                        </StackPanel>
+                                        <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.WordByWordHighlight, Mode=TwoWay}" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="10">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Сдвиг синхронизации" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatOffset(ViewModel.LyricsOffsetMs), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="-1500" Maximum="1500" StepFrequency="10" Value="{x:Bind ViewModel.LyricsOffsetMs, Mode=TwoWay}" />
+                                        <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="Если слова подсвечиваются раньше пения — сдвиньте вправо, если позже — влево." />
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="СМЕНА СТРОК" />
+                                <Border Style="{StaticResource GlassSegmentHostStyle}">
+                                    <Grid x:Name="LineAnimationChoices" ColumnSpacing="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <RadioButton Grid.Column="0" GroupName="LineAnimation" Tag="Smooth" Content="Плавно" Style="{StaticResource GlassChipStyle}" />
+                                        <RadioButton Grid.Column="1" GroupName="LineAnimation" Tag="Spring" Content="Пружина" Style="{StaticResource GlassChipStyle}" />
+                                        <RadioButton Grid.Column="2" GroupName="LineAnimation" Tag="Snappy" Content="Резко" Style="{StaticResource GlassChipStyle}" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="10">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Длительность" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatSeconds(ViewModel.LineAnimationDurationSeconds), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0.12" Maximum="1.2" StepFrequency="0.01" Value="{x:Bind ViewModel.LineAnimationDurationSeconds, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Затухание по краям" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatNumber(ViewModel.ViewportFadeZone), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0" Maximum="180" StepFrequency="1" Value="{x:Bind ViewModel.ViewportFadeZone, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Мягкость затухания" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatDecimal(ViewModel.ViewportFadeSoftness), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0.4" Maximum="2.2" StepFrequency="0.01" Value="{x:Bind ViewModel.ViewportFadeSoftness, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="ВИЗУАЛИЗАТОР" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="10">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Зеркальные полосы" />
+                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.OscilloscopeMirrorBars, Mode=TwoWay}" />
+                                        </Grid>
+                                        <Grid>
+                                            <StackPanel Margin="0,0,60,0">
+                                                <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Звук только плеера" />
+                                                <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="Бета: захват аудио активного приложения" />
+                                            </StackPanel>
+                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.AppScopedAudioCapture, Mode=TwoWay}" />
+                                        </Grid>
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Чувствительность" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatDecimal(ViewModel.OscilloscopeSensitivity), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0.5" Maximum="2.6" StepFrequency="0.01" Value="{x:Bind ViewModel.OscilloscopeSensitivity, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Отзывчивость" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatPercent(ViewModel.OscilloscopeResponsiveness), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="0.08" Maximum="0.95" StepFrequency="0.01" Value="{x:Bind ViewModel.OscilloscopeResponsiveness, Mode=TwoWay}" />
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Детализация" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatNumber(ViewModel.OscilloscopeDetail), Mode=OneWay}" />
+                                        </Grid>
+                                        <Slider Style="{StaticResource GlassSliderStyle}" Minimum="96" Maximum="320" StepFrequency="2" Value="{x:Bind ViewModel.OscilloscopeDetail, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+
+                            <!-- ============================== Page 3: Widget -->
+                            <StackPanel x:Name="SettingsPageWidget" Spacing="8" Visibility="Collapsed">
+                                <TextBlock Style="{StaticResource GlassSectionTitleStyle}" Text="ПОЛОЖЕНИЕ" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <Grid ColumnSpacing="14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="132" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid x:Name="AnchorGrid" Height="88" ColumnSpacing="4" RowSpacing="4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="*" />
+                                                <RowDefinition Height="*" />
+                                                <RowDefinition Height="*" />
+                                            </Grid.RowDefinitions>
+                                            <Button Grid.Row="0" Grid.Column="0" Tag="0,0" Style="{StaticResource GlassAnchorButtonStyle}" Click="AnchorButton_OnClick" />
+                                            <Button Grid.Row="0" Grid.Column="1" Tag="1,0" Style="{StaticResource GlassAnchorButtonStyle}" Click="AnchorButton_OnClick" />
+                                            <Button Grid.Row="0" Grid.Column="2" Tag="2,0" Style="{StaticResource GlassAnchorButtonStyle}" Click="AnchorButton_OnClick" />
+                                            <Button Grid.Row="1" Grid.Column="0" Tag="0,1" Style="{StaticResource GlassAnchorButtonStyle}" Click="AnchorButton_OnClick" />
+                                            <Button Grid.Row="1" Grid.Column="1" Tag="1,1" Style="{StaticResource GlassAnchorButtonStyle}" Click="AnchorButton_OnClick" />
+                                            <Button Grid.Row="1" Grid.Column="2" Tag="2,1" Style="{StaticResource GlassAnchorButtonStyle}" Click="AnchorButton_OnClick" />
+                                            <Button Grid.Row="2" Grid.Column="0" Tag="0,2" Style="{StaticResource GlassAnchorButtonStyle}" Click="AnchorButton_OnClick" />
+                                            <Button Grid.Row="2" Grid.Column="1" Tag="1,2" Style="{StaticResource GlassAnchorButtonStyle}" Click="AnchorButton_OnClick" />
+                                            <Button Grid.Row="2" Grid.Column="2" Tag="2,2" Style="{StaticResource GlassAnchorButtonStyle}" Click="AnchorButton_OnClick" />
+                                        </Grid>
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Быстрая привязка" />
+                                            <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="Или перетащите виджет мышью — он прилипает к сетке. Shift отключает привязку." />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="ПОВЕДЕНИЕ" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="12">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Скрывать на паузе" />
+                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.HideOnPause, Mode=TwoWay}" />
+                                        </Grid>
+                                        <StackPanel Spacing="10" Visibility="{x:Bind local:MainPage.VisibleIf(ViewModel.HideOnPause), Mode=OneWay}">
+                                            <Grid>
+                                                <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Задержка" />
+                                                <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind local:MainPage.FormatSeconds(ViewModel.PauseHideDelaySeconds), Mode=OneWay}" />
+                                            </Grid>
+                                            <Slider Style="{StaticResource GlassSliderStyle}" Minimum="1" Maximum="20" StepFrequency="0.5" Value="{x:Bind ViewModel.PauseHideDelaySeconds, Mode=TwoWay}" />
+                                        </StackPanel>
+                                        <Grid>
+                                            <StackPanel Margin="0,0,60,0">
+                                                <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Ручка перетаскивания" />
+                                                <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="Полоска над текстом при наведении" />
+                                            </StackPanel>
+                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.ShowDragHandle, Mode=TwoWay}" />
+                                        </Grid>
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Запуск вместе с Windows" />
+                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.RunAtStartup, Mode=TwoWay}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <TextBlock
+                                    Margin="6,2,6,0"
+                                    Style="{StaticResource GlassCaptionStyle}"
+                                    Text="Виджет живёт только на рабочем столе: он всегда под окнами приложений и появляется, когда вы смотрите на обои." />
+                            </StackPanel>
+
+                            <!-- ============================== Page 4: More -->
+                            <StackPanel x:Name="SettingsPageMore" Spacing="8" Visibility="Collapsed">
+                                <TextBlock Style="{StaticResource GlassSectionTitleStyle}" Text="ТЕКСТ ПЕСНИ" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="{x:Bind ViewModel.SourceText, Mode=OneWay}" />
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="ОБНОВЛЕНИЯ" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="10">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Версия" />
+                                            <TextBlock Style="{StaticResource GlassValueStyle}" Text="{x:Bind ViewModel.AppVersionText, Mode=OneWay}" />
+                                        </Grid>
+                                        <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="{x:Bind ViewModel.UpdateStatusText, Mode=OneWay}" />
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Button Style="{StaticResource GlassActionButtonStyle}" Click="CheckForUpdatesButton_OnClick" Content="Проверить" />
+                                            <Button Grid.Column="1" Style="{StaticResource GlassActionButtonStyle}" Click="OpenReleasesButton_OnClick" Content="Релизы" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="ФАЙЛЫ" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <Grid ColumnSpacing="8" RowSpacing="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Button Style="{StaticResource GlassActionButtonStyle}" Click="OpenConfigFolderButton_OnClick" Content="Папка настроек" />
+                                        <Button Grid.Column="1" Style="{StaticResource GlassActionButtonStyle}" Click="OpenConfigFileButton_OnClick" Content="settings.json" />
+                                        <Button Grid.Row="1" Style="{StaticResource GlassActionButtonStyle}" Click="OpenLogsFolderButton_OnClick" Content="Логи" />
+                                        <Button Grid.Row="1" Grid.Column="1" Style="{StaticResource GlassActionButtonStyle}" Click="ExportDebugSnapshotButton_OnClick" Content="Снимок отладки" />
+                                    </Grid>
+                                </Border>
+
+                                <TextBlock Margin="6,8,0,0" Style="{StaticResource GlassSectionTitleStyle}" Text="ОТЛАДКА" />
+                                <Border Style="{StaticResource GlassGroupStyle}">
+                                    <StackPanel Spacing="12">
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Рамки элементов" />
+                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.ShowDebugHitboxes, Mode=TwoWay}" />
+                                        </Grid>
+                                        <Grid>
+                                            <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Панель диагностики" />
+                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.ShowRuntimeDebugPanel, Mode=TwoWay}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <Button
+                                    Margin="0,8,0,0"
+                                    Style="{StaticResource GlassActionButtonStyle}"
+                                    Foreground="#FFFFB4B4"
+                                    Click="ResetAllSettingsButton_OnClick"
+                                    Content="Сбросить все настройки" />
+                            </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+        </Canvas>
 
         <Border
             Canvas.ZIndex="500"

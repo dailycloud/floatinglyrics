@@ -26,6 +26,8 @@ public sealed class AppServices : IDisposable
         {
             nowPlayingService = new SmtcNowPlayingService();
             lyricsProvider = new CompositeLyricsProvider(
+                // Word-by-word lyrics first; the key lives in the user's local settings (or env).
+                new SpicyLyricsProvider(httpClient, ResolveSpicyLyricsKey),
                 new LrcLibLyricsProvider(httpClient),
                 new MusixmatchLyricsProvider(httpClient),
                 new LocalLrcLyricsProvider(),
@@ -41,6 +43,14 @@ public sealed class AppServices : IDisposable
             startupRegistrationService,
             updateService,
             settingsOnlyMode);
+    }
+
+    private string? ResolveSpicyLyricsKey()
+    {
+        var fromEnvironment = Environment.GetEnvironmentVariable("FLOATING_LYRICS_SPICY_KEY");
+        return !string.IsNullOrWhiteSpace(fromEnvironment)
+            ? fromEnvironment
+            : settingsStore.Load().SpicyLyricsApiKey;
     }
 
     public void Dispose()

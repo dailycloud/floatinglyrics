@@ -134,8 +134,8 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         SettingsDirectoryPath = settingsStore.SettingsDirectoryPath;
         CoverArtImage = CreateCoverArtImage(null);
         AppVersionText = $"v{appVersion}";
-        UpdateStatusText = L("Updates are not checked yet.", "РћР±РЅРѕРІР»РµРЅРёСЏ РµС‰С‘ РЅРµ РїСЂРѕРІРµСЂСЏР»РёСЃСЊ.");
-        UpdateLastCheckedText = L("Last check: never", "РџРѕСЃР»РµРґРЅСЏСЏ РїСЂРѕРІРµСЂРєР°: РЅРёРєРѕРіРґР°");
+        UpdateStatusText = L("Updates are not checked yet.", "Обновления ещё не проверялись.");
+        UpdateLastCheckedText = L("Last check: never", "Последняя проверка: никогда");
 
         CustomPositionPresets.CollectionChanged += OnCustomPositionPresetsChanged;
 
@@ -164,6 +164,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             DebugTrace.Write("MainViewModel: initial refresh");
             _ = RefreshAsync();
             _ = RunStartupUpdateCheckAsync();
+            StartPeriodicUpdateChecks(dispatcherQueue);
         }
         else
         {
@@ -467,9 +468,9 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     public bool HasUpdateReleaseUrl => !string.IsNullOrWhiteSpace(GetUpdateReleaseUrl());
     public string UpdateRepositoryText => IsGitHubUpdateConfigured
         ? $"{GitHubOwner.Trim()}/{GitHubRepository.Trim()}"
-        : L("Repository is not configured", "Р РµРїРѕР·РёС‚РѕСЂРёР№ РЅРµ РЅР°СЃС‚СЂРѕРµРЅ");
+        : L("Repository is not configured", "Репозиторий не настроен");
     public string UpdateCheckIntervalText => UseRussianUi
-        ? $"РРЅС‚РµСЂРІР°Р»: {UpdateCheckIntervalHours:F0} С‡"
+        ? $"Интервал: {UpdateCheckIntervalHours:F0} ч"
         : $"Interval: {UpdateCheckIntervalHours:F0}h";
 
     public IReadOnlyList<LyricLine> TimelineLines => timeline;
@@ -480,7 +481,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
     public SolidColorBrush TrackTitleBrush => new(GetPalette().PrimaryText);
     public SolidColorBrush ArtistBrush => new(GetPalette().SecondaryText);
-    public SolidColorBrush CurrentLineBrush => new(Color.FromArgb(255, 255, 255, 255));
+    public SolidColorBrush CurrentLineBrush => new(UseDarkText ? Color.FromArgb(255, 14, 16, 22) : Color.FromArgb(255, 255, 255, 255));
     public SolidColorBrush PreviousLineBrush => new(GetPalette().SecondaryText);
     public SolidColorBrush NextLineBrush => new(GetPalette().MutedText);
     public SolidColorBrush TimingBrush => new(GetPalette().TimingText);
@@ -488,6 +489,190 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     public Color OscilloscopeLowAccentColor => artworkLowAccentColor;
     public Color OscilloscopeMidAccentColor => artworkMidAccentColor;
     public Color OscilloscopeHighAccentColor => artworkHighAccentColor;
+    public Color ArtworkAccentColor => artworkDominantColor;
+
+    // ---- Liquid glass & typography customization ----
+
+    [ObservableProperty]
+    private GlassVisibilityMode glassVisibility = GlassVisibilityMode.OnHover;
+
+    [ObservableProperty]
+    private double glassBlur = 14;
+
+    [ObservableProperty]
+    private double glassRefraction = 0.65;
+
+    [ObservableProperty]
+    private double glassDispersion = 0.6;
+
+    [ObservableProperty]
+    private double glassSpecular = 0.8;
+
+    [ObservableProperty]
+    private GlassTintPreset glassTint = GlassTintPreset.Smoke;
+
+    [ObservableProperty]
+    private double glassTintStrength = 0.32;
+
+    [ObservableProperty]
+    private double glassCornerRadius = 30;
+
+    [ObservableProperty]
+    private double glassPadding = 22;
+
+    [ObservableProperty]
+    private bool glassCursorLight = true;
+
+    [ObservableProperty]
+    private bool useArtworkTextColors = true;
+
+    [ObservableProperty]
+    private LyricsFontOption lyricsFont = LyricsFontOption.SegoeVariable;
+
+    [ObservableProperty]
+    private LyricsFontWeightOption lyricsFontWeight = LyricsFontWeightOption.Semibold;
+
+    [ObservableProperty]
+    private LineAnimationStyle lineAnimationStyle = LineAnimationStyle.Spring;
+
+    partial void OnGlassVisibilityChanged(GlassVisibilityMode value) => PersistSettingsIfReady();
+    partial void OnGlassBlurChanged(double value) => PersistSettingsIfReady();
+    partial void OnGlassRefractionChanged(double value) => PersistSettingsIfReady();
+    partial void OnGlassDispersionChanged(double value) => PersistSettingsIfReady();
+    partial void OnGlassSpecularChanged(double value) => PersistSettingsIfReady();
+    partial void OnGlassTintChanged(GlassTintPreset value) => PersistSettingsIfReady();
+    partial void OnGlassTintStrengthChanged(double value) => PersistSettingsIfReady();
+    partial void OnGlassCornerRadiusChanged(double value) => PersistSettingsIfReady();
+    partial void OnGlassPaddingChanged(double value) => PersistSettingsIfReady();
+    partial void OnGlassCursorLightChanged(bool value) => PersistSettingsIfReady();
+    partial void OnLyricsFontChanged(LyricsFontOption value) => PersistSettingsIfReady();
+    partial void OnLyricsFontWeightChanged(LyricsFontWeightOption value) => PersistSettingsIfReady();
+    partial void OnLineAnimationStyleChanged(LineAnimationStyle value) => PersistSettingsIfReady();
+
+    // Kept only to round-trip the user's key through settings.json (never shown or logged).
+    private string spicyLyricsApiKey = string.Empty;
+
+    public bool HasSpicyLyricsKey => !string.IsNullOrWhiteSpace(spicyLyricsApiKey) ||
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("FLOATING_LYRICS_SPICY_KEY"));
+
+    /// <summary>Installed or user-supplied font family name; overrides <see cref="LyricsFont"/> when set.</summary>
+    [ObservableProperty]
+    private string customFontFamily = string.Empty;
+
+    [ObservableProperty]
+    private TextContrastMode textContrast = TextContrastMode.Auto;
+
+    [ObservableProperty]
+    private bool wordByWordHighlight = true;
+
+    /// <summary>True when the backdrop behind the text is light (set by the view from the wallpaper).</summary>
+    [ObservableProperty]
+    private bool isBackdropLight;
+
+    partial void OnCustomFontFamilyChanged(string value) => PersistSettingsIfReady();
+    partial void OnWordByWordHighlightChanged(bool value) => PersistSettingsIfReady();
+
+    partial void OnTextContrastChanged(TextContrastMode value)
+    {
+        NotifyPaletteChanged();
+        PersistSettingsIfReady();
+    }
+
+    partial void OnIsBackdropLightChanged(bool value) => NotifyPaletteChanged();
+
+    /// <summary>Dark text is used for Dark mode, and for Auto/Invert when the backdrop is light.</summary>
+    public bool UseDarkText => TextContrast switch
+    {
+        TextContrastMode.Dark => true,
+        TextContrastMode.Light => false,
+        _ => IsBackdropLight
+    };
+
+    private void NotifyPaletteChanged()
+    {
+        OnPropertyChanged(nameof(UseDarkText));
+        OnPropertyChanged(nameof(TrackTitleBrush));
+        OnPropertyChanged(nameof(ArtistBrush));
+        OnPropertyChanged(nameof(CurrentLineBrush));
+        OnPropertyChanged(nameof(PreviousLineBrush));
+        OnPropertyChanged(nameof(NextLineBrush));
+        OnPropertyChanged(nameof(TimingBrush));
+        OnPropertyChanged(nameof(TextShadowBrush));
+    }
+
+    // ---- playback clock for word-by-word highlighting ----
+
+    private TimeSpan playbackAnchorPosition;
+    private long playbackAnchorTimestamp;
+    private bool playbackAnchorIsPlaying;
+
+    /// <summary>
+    /// Current playback position (with the user's sync offset), interpolated between SMTC polls.
+    /// </summary>
+    public TimeSpan GetInterpolatedPlaybackPosition() => GetRawPlaybackPosition() + LyricsOffset;
+
+    private TimeSpan LyricsOffset => TimeSpan.FromMilliseconds(Math.Clamp(LyricsOffsetMs, -2000, 2000));
+
+    private TimeSpan GetRawPlaybackPosition()
+    {
+        if (!playbackAnchorIsPlaying || playbackAnchorTimestamp == 0)
+        {
+            return playbackAnchorPosition;
+        }
+
+        var elapsed = Stopwatch.GetElapsedTime(playbackAnchorTimestamp);
+        return playbackAnchorPosition + (elapsed > TimeSpan.FromSeconds(5) ? TimeSpan.FromSeconds(5) : elapsed);
+    }
+
+    public bool IsPlaybackRunning => playbackAnchorIsPlaying;
+
+    /// <summary>
+    /// Phase-locked playback clock. SMTC positions are noisy (extrapolated from a coarse
+    /// LastUpdatedTime); instead of jumping to each sample (or, worse, always taking the larger
+    /// one, which runs ahead), the clock keeps ticking smoothly and is nudged toward every sample
+    /// by a small fraction. Only real seeks (large errors) cause a hard re-sync.
+    /// </summary>
+    private void UpdatePlaybackAnchor(TimeSpan position, bool isPlaying)
+    {
+        var now = Stopwatch.GetTimestamp();
+        if (!isPlaying || !playbackAnchorIsPlaying)
+        {
+            playbackAnchorPosition = position;
+            playbackAnchorTimestamp = now;
+            playbackAnchorIsPlaying = isPlaying;
+            return;
+        }
+
+        var predicted = GetRawPlaybackPosition();
+        var error = position - predicted;
+        if (error.Duration() > TimeSpan.FromMilliseconds(700))
+        {
+            playbackAnchorPosition = position;
+        }
+        else
+        {
+            playbackAnchorPosition = predicted + TimeSpan.FromTicks((long)(error.Ticks * 0.12));
+        }
+
+        playbackAnchorTimestamp = now;
+    }
+
+    /// <summary>Lyrics sync offset in ms (positive = lyrics later, negative = earlier).</summary>
+    [ObservableProperty]
+    private double lyricsOffsetMs;
+
+    partial void OnLyricsOffsetMsChanged(double value) => PersistSettingsIfReady();
+
+    partial void OnUseArtworkTextColorsChanged(bool value)
+    {
+        OnPropertyChanged(nameof(TrackTitleBrush));
+        OnPropertyChanged(nameof(ArtistBrush));
+        OnPropertyChanged(nameof(CurrentLineBrush));
+        OnPropertyChanged(nameof(PreviousLineBrush));
+        OnPropertyChanged(nameof(NextLineBrush));
+        OnPropertyChanged(nameof(TimingBrush));
+        PersistSettingsIfReady();
+    }
 
     partial void OnShowLineTimingsChanged(bool value)
     {
@@ -890,9 +1075,9 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     partial void OnLastUpdateCheckUtcChanged(DateTimeOffset? value)
     {
         UpdateLastCheckedText = value is null
-            ? L("Last check: never", "РџРѕСЃР»РµРґРЅСЏСЏ РїСЂРѕРІРµСЂРєР°: РЅРёРєРѕРіРґР°")
+            ? L("Last check: never", "Последняя проверка: никогда")
             : UseRussianUi
-                ? $"РџРѕСЃР»РµРґРЅСЏСЏ РїСЂРѕРІРµСЂРєР°: {value.Value.ToLocalTime():g}"
+                ? $"Последняя проверка: {value.Value.ToLocalTime():g}"
                 : $"Last check: {value.Value.ToLocalTime():g}";
         PersistSettingsIfReady();
     }
@@ -1100,12 +1285,21 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             }
 
             MarkSnapshotSeen();
+            UpdatePlaybackAnchor(snapshot.Position, snapshot.IsPlaying);
             HasActiveSession = true;
+            var previousTrackKey = activeTrackKey;
             activeTrackKey = BuildTrackKey(snapshot.Track);
             UpdatePlaybackVisibility(snapshot);
             TraceSessionDecision("refresh-live", snapshot);
             StatusText = L("Player found. Fetching lyrics...", "Плеер найден. Загружаю текст...");
             ApplySnapshotTrackInfo(snapshot.Track);
+            if (!string.IsNullOrEmpty(previousTrackKey) &&
+                !string.Equals(previousTrackKey, activeTrackKey, StringComparison.Ordinal))
+            {
+                // Drop the previous song's lines right away (visualizer shows while the new
+                // lyrics are fetched) instead of leaving stale lyrics under the new title.
+                LoadTimeline(Array.Empty<LyricLine>(), snapshot.Position, providerSaysSynced: false);
+            }
 
             var result = await lyricsProvider.GetLyricsAsync(snapshot.Track, disposeTokenSource.Token);
             if (result is null)
@@ -1270,6 +1464,20 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         }
     }
 
+    private const string DefaultUpdateOwner = "dailycloud";
+    private const string DefaultUpdateRepository = "floatinglyrics";
+    private DispatcherQueueTimer? updateTimer;
+
+    /// <summary>The widget runs for days: re-check for updates every hour (respecting the interval).</summary>
+    private void StartPeriodicUpdateChecks(DispatcherQueue dispatcherQueue)
+    {
+        updateTimer = dispatcherQueue.CreateTimer();
+        updateTimer.Interval = TimeSpan.FromHours(1);
+        updateTimer.IsRepeating = true;
+        updateTimer.Tick += (_, _) => _ = RunStartupUpdateCheckAsync();
+        updateTimer.Start();
+    }
+
     private bool CanCheckForUpdates() => !IsUpdateCheckInProgress;
 
     [RelayCommand(CanExecute = nameof(CanCheckForUpdates))]
@@ -1312,6 +1520,34 @@ public partial class MainViewModel : BaseViewModel, IDisposable
                 StatusText = UseRussianUi
                     ? $"Доступно обновление: v{result.LatestVersion}"
                     : $"Update available: v{result.LatestVersion}";
+
+                if (!string.IsNullOrWhiteSpace(result.AssetUrl) && result.LatestVersion is { } latest)
+                {
+                    UpdateStatusText = L($"Downloading v{latest}...", $"Скачиваю v{latest}...");
+                    try
+                    {
+                        if (await UpdateInstaller.DownloadAndScheduleAsync(result.AssetUrl, latest, disposeTokenSource.Token))
+                        {
+                            UpdateStatusText = L("Installing, the widget restarts...", "Устанавливаю, виджет перезапустится...");
+                            PersistSettings();
+                            Microsoft.UI.Xaml.Application.Current.Exit();
+                            return;
+                        }
+
+                        UpdateStatusText = L("The release package is invalid.", "Пакет релиза повреждён.");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugTrace.Write($"Update: install failed {ex}");
+                        UpdateStatusText = UseRussianUi
+                            ? $"Не удалось установить обновление: {ex.Message}"
+                            : $"Unable to install the update: {ex.Message}";
+                    }
+                }
             }
         }
         catch (OperationCanceledException)
@@ -1646,6 +1882,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             }
 
             MarkSnapshotSeen();
+            UpdatePlaybackAnchor(snapshot.Position, snapshot.IsPlaying);
             if (!HasActiveSession)
             {
                 HasActiveSession = true;
@@ -1691,8 +1928,13 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             return;
         }
 
-        var animationLeadTime = TimeSpan.FromSeconds(LineAnimationDurationSeconds);
-        var adjustedPosition = playbackPosition + animationLeadTime;
+        // Source-timed lyrics (TTML / Spicy: every line has an end) are used exactly as authored.
+        // Only plain LRC (start times only) gets a small lead so its transition lands on time.
+        var hasExactTiming = timeline.Count > 0 && timeline[0].EndTime.HasValue;
+        var animationLeadTime = hasExactTiming
+            ? TimeSpan.Zero
+            : TimeSpan.FromSeconds(Math.Min(LineAnimationDurationSeconds, 0.45));
+        var adjustedPosition = playbackPosition + LyricsOffset + animationLeadTime;
         var firstTimestamp = timeline[0].Timestamp;
         if (firstTimestamp.HasValue && adjustedPosition < firstTimestamp.Value)
         {
@@ -1715,6 +1957,21 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             }
 
             break;
+        }
+
+        if (hasExactTiming)
+        {
+            // A later line starting never cuts off one that is still being sung: the view stays
+            // on the earliest line that has not reached its own end time (overlapping lines are
+            // all highlighted by the view at once).
+            for (var i = Math.Max(0, targetIndex - 6); i < targetIndex; i++)
+            {
+                if (timeline[i].EndTime is { } end && end > adjustedPosition)
+                {
+                    targetIndex = i;
+                    break;
+                }
+            }
         }
 
         ClearPendingLineAdvance();
@@ -2077,6 +2334,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         OnPropertyChanged(nameof(OscilloscopeLowAccentColor));
         OnPropertyChanged(nameof(OscilloscopeMidAccentColor));
         OnPropertyChanged(nameof(OscilloscopeHighAccentColor));
+        OnPropertyChanged(nameof(ArtworkAccentColor));
         OnPropertyChanged(nameof(TrackTitleBrush));
         OnPropertyChanged(nameof(ArtistBrush));
         OnPropertyChanged(nameof(CurrentLineBrush));
@@ -2321,28 +2579,14 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
     public void RestoreOverlayVisibility()
     {
-        if (DesktopWidgetMode)
-        {
-            DesktopWidgetMode = false;
-        }
-        else
-        {
-            _ = windowModeService.TrySetMode(WindowPresentationMode.Floating);
-            _ = windowModeService.TrySetAlwaysOnTop(AlwaysOnTop);
-        }
-
-        if (SelectedPositionPreset == WindowPositionPreset.Manual && SelectedCustomPositionPreset is null)
-        {
-            _ = windowModeService.TryApplyPositionPreset(WindowPositionPreset.MiddleCenter);
-        }
-        else
-        {
-            ReapplyCurrentPositionPreset();
-        }
-
-        _ = windowModeService.TryEnsureVisibleOnWorkArea();
-        StatusText = L("Overlay restored.", "Оверлей восстановлен.");
+        // Desktop-only widget: re-attach to the shell desktop (e.g. after Explorer restart).
+        _ = windowModeService.TrySetMode(WindowPresentationMode.Wallpaper);
+        _ = TryApplyOverlayResize();
+        StatusText = L("Widget restored on the desktop.", "Виджет восстановлен на рабочем столе.");
     }
+
+    /// <summary>Re-attaches the widget to the desktop when Explorer recreated its windows.</summary>
+    public bool EnsureDesktopAttachment() => windowModeService.EnsureWallpaperAttachment();
 
     public void Dispose()
     {
@@ -2415,6 +2659,25 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         AutoHideCoverOnLongLine = settings.AutoHideCoverOnLongLine;
         CenterAlignmentShowCoverOnTop = settings.CenterAlignmentShowCoverOnTop;
         CenterAlignmentCoverSize = Math.Clamp(settings.CenterAlignmentCoverSize, 56, 240);
+        GlassVisibility = Enum.IsDefined(settings.GlassVisibility) ? settings.GlassVisibility : GlassVisibilityMode.OnHover;
+        GlassBlur = Math.Clamp(settings.GlassBlur, 0, 40);
+        GlassRefraction = Math.Clamp(settings.GlassRefraction, 0, 1);
+        GlassDispersion = Math.Clamp(settings.GlassDispersion, 0, 1);
+        GlassSpecular = Math.Clamp(settings.GlassSpecular, 0, 1);
+        GlassTint = Enum.IsDefined(settings.GlassTint) ? settings.GlassTint : GlassTintPreset.Smoke;
+        GlassTintStrength = Math.Clamp(settings.GlassTintStrength, 0, 0.9);
+        GlassCornerRadius = Math.Clamp(settings.GlassCornerRadius, 8, 56);
+        GlassPadding = Math.Clamp(settings.GlassPadding, 8, 56);
+        GlassCursorLight = settings.GlassCursorLight;
+        UseArtworkTextColors = settings.UseArtworkTextColors;
+        LyricsFont = Enum.IsDefined(settings.LyricsFont) ? settings.LyricsFont : LyricsFontOption.SegoeVariable;
+        LyricsFontWeight = Enum.IsDefined(settings.LyricsFontWeight) ? settings.LyricsFontWeight : LyricsFontWeightOption.Semibold;
+        LineAnimationStyle = Enum.IsDefined(settings.LineAnimationStyle) ? settings.LineAnimationStyle : LineAnimationStyle.Spring;
+        spicyLyricsApiKey = settings.SpicyLyricsApiKey?.Trim() ?? string.Empty;
+        CustomFontFamily = settings.CustomFontFamily?.Trim() ?? string.Empty;
+        TextContrast = Enum.IsDefined(settings.TextContrast) ? settings.TextContrast : TextContrastMode.Auto;
+        WordByWordHighlight = settings.WordByWordHighlight;
+        LyricsOffsetMs = Math.Clamp(settings.LyricsOffsetMs, -2000, 2000);
 
         CustomPositionPresets.Clear();
         foreach (var preset in settings.CustomPositionPresets)
@@ -2441,14 +2704,15 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             : CustomPositionPresets.FirstOrDefault(x => string.Equals(x.Id, settings.SelectedCustomPresetId, StringComparison.Ordinal));
 
         StartInDesktopWidgetMode = settings.StartInDesktopWidgetMode;
-        DesktopWidgetMode = applyStartupFallback
-            ? (settings.StartInDesktopWidgetMode || settings.DesktopWidgetMode)
-            : settings.DesktopWidgetMode;
-        AlwaysOnTop = settings.AlwaysOnTop;
+        // The widget lives on the desktop only: it is always hosted inside the shell
+        // desktop window and never floats above other applications.
+        DesktopWidgetMode = true;
+        AlwaysOnTop = false;
         EnableAutomaticUpdateChecks = settings.EnableAutomaticUpdateChecks;
         UpdateCheckIntervalHours = Math.Clamp(settings.UpdateCheckIntervalHours, 1, 168);
-        GitHubOwner = settings.GitHubOwner?.Trim() ?? string.Empty;
-        GitHubRepository = settings.GitHubRepository?.Trim() ?? string.Empty;
+        // Updates come from the project's own GitHub releases unless configured otherwise.
+        GitHubOwner = string.IsNullOrWhiteSpace(settings.GitHubOwner) ? DefaultUpdateOwner : settings.GitHubOwner.Trim();
+        GitHubRepository = string.IsNullOrWhiteSpace(settings.GitHubRepository) ? DefaultUpdateRepository : settings.GitHubRepository.Trim();
         LastUpdateCheckUtc = settings.LastUpdateCheckUtc;
         updateReleaseUrl = GitHubUpdateService.BuildReleasesPageUrl(GitHubOwner, GitHubRepository);
 
@@ -2497,7 +2761,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             suppressModePropertyHandlers = true;
             DesktopWidgetMode = false;
             suppressModePropertyHandlers = false;
-            StatusText = L("Unable to enable desktop widget mode.", "РќРµ СѓРґР°Р»РѕСЃСЊ РІРєР»СЋС‡РёС‚СЊ СЂРµР¶РёРј desktop-widget.");
+            StatusText = L("Unable to enable desktop widget mode.", "Не удалось включить режим desktop-widget.");
             PersistSettingsIfReady();
         }
 
@@ -2626,6 +2890,25 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             AutoHideCoverOnLongLine = AutoHideCoverOnLongLine,
             CenterAlignmentShowCoverOnTop = CenterAlignmentShowCoverOnTop,
             CenterAlignmentCoverSize = CenterAlignmentCoverSize,
+            GlassVisibility = GlassVisibility,
+            GlassBlur = GlassBlur,
+            GlassRefraction = GlassRefraction,
+            GlassDispersion = GlassDispersion,
+            GlassSpecular = GlassSpecular,
+            GlassTint = GlassTint,
+            GlassTintStrength = GlassTintStrength,
+            GlassCornerRadius = GlassCornerRadius,
+            GlassPadding = GlassPadding,
+            GlassCursorLight = GlassCursorLight,
+            UseArtworkTextColors = UseArtworkTextColors,
+            LyricsFont = LyricsFont,
+            LyricsFontWeight = LyricsFontWeight,
+            LineAnimationStyle = LineAnimationStyle,
+            SpicyLyricsApiKey = spicyLyricsApiKey,
+            CustomFontFamily = CustomFontFamily,
+            TextContrast = TextContrast,
+            WordByWordHighlight = WordByWordHighlight,
+            LyricsOffsetMs = LyricsOffsetMs,
             CustomPositionPresets = [.. CustomPositionPresets],
             SelectedCustomPresetId = SelectedCustomPositionPreset?.Id ?? string.Empty
         });
@@ -2655,10 +2938,8 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
     private bool IsManualCenterAlignment => LyricsTextAlignment == LyricsTextAlignmentMode.Center && !AutoLyricsTextAlignment;
 
-    private bool IsCoverVisible => ShowCoverArt
-        && hasCoverArt
-        && !hideCoverForCurrentLine
-        && (!IsManualCenterAlignment || CenterAlignmentShowCoverOnTop);
+    // Album art is no longer drawn inside the desktop widget (it still drives the colours).
+    private bool IsCoverVisible => false;
 
     private static string NormalizeTrackMetaPartV2(string? raw)
     {
@@ -2791,12 +3072,26 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     private Color GetShadowColor()
     {
         var alpha = (byte)Math.Round(Math.Clamp(TextShadowOpacity, 0.05, 1) * 255);
-        return Color.FromArgb(alpha, 0, 0, 0);
+        // Dark text on a light backdrop gets a soft light halo instead of a dark shadow.
+        return UseDarkText
+            ? Color.FromArgb((byte)(alpha * 0.8), 255, 255, 255)
+            : Color.FromArgb(alpha, 0, 0, 0);
     }
 
     private LyricsPalette GetPalette()
     {
-        if (hasArtworkTheme)
+        if (UseDarkText)
+        {
+            // Readable on light wallpapers / frosted glass: near-black with a hint of the artwork hue.
+            var hue = hasArtworkTheme && UseArtworkTextColors ? artworkDominantColor : Color.FromArgb(255, 30, 34, 44);
+            return new LyricsPalette(
+                LerpColor(Color.FromArgb(255, 12, 14, 20), hue, 0.18),
+                LerpColor(Color.FromArgb(255, 44, 48, 58), hue, 0.22),
+                LerpColor(Color.FromArgb(255, 70, 74, 84), hue, 0.2),
+                Color.FromArgb(255, 60, 64, 74));
+        }
+
+        if (hasArtworkTheme && UseArtworkTextColors)
         {
             return GetArtworkAdaptivePalette();
         }

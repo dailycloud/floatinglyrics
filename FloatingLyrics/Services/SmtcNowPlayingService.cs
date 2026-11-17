@@ -44,13 +44,69 @@ public sealed class SmtcNowPlayingService : INowPlayingService
     private DateTimeOffset cachedMetadataFetchedAtUtc = DateTimeOffset.MinValue;
     private DateTimeOffset lastMetadataAttemptAtUtc = DateTimeOffset.MinValue;
     private static int artworkCacheWriteCount;
+    private readonly HashSet<GlobalSystemMediaTransportControlsSession> observedSessions = [];
+    private volatile bool metadataInvalidated;
+
+    private string? emittedTitle;
+    private string? emittedArtist;
 
     public async Task<PlaybackSnapshot?> GetPlaybackSnapshotAsync(CancellationToken cancellationToken)
+    {
+        var snapshot = await GetPlaybackSnapshotCoreAsync(cancellationToken);
+        return snapshot is null ? null : ApplySpotifyIdentity(snapshot);
+    }
+
+    /// <summary>
+    /// Spotify updates SMTC metadata 10-30 s late, but its window title immediately. While the two
+    /// disagree, the window title defines the track (stale artwork/duration are dropped). Once SMTC
+    /// catches up, the identity already emitted is kept so the track key does not flip twice.
+    /// </summary>
+    private PlaybackSnapshot ApplySpotifyIdentity(PlaybackSnapshot snapshot)
+    {
+        var track = snapshot.Track;
+        if (track.SourceAppId?.Contains("spotify", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            emittedTitle = null;
+            emittedArtist = null;
+            return snapshot;
+        }
+
+        if (SpotifyWindowTitle.TryRead(out var windowArtist, out var windowTitle) &&
+            !SameText(windowTitle, track.Title))
+        {
+            if (!SameText(windowTitle, emittedTitle))
+            {
+                DebugTrace.Write($"SMTC: Spotify window ahead of SMTC -> '{windowArtist} - {windowTitle}' (SMTC still '{track.Title}')");
+                emittedTitle = windowTitle;
+                emittedArtist = windowArtist;
+            }
+
+            return snapshot with
+            {
+                Track = track with { Title = emittedTitle!, Artist = emittedArtist!, ArtworkPath = null, Duration = null }
+            };
+        }
+
+        if (emittedTitle is not null && emittedArtist is not null && SameText(track.Title, emittedTitle))
+        {
+            return snapshot with { Track = track with { Title = emittedTitle, Artist = emittedArtist } };
+        }
+
+        emittedTitle = track.Title;
+        emittedArtist = track.Artist;
+        return snapshot;
+    }
+
+    private static bool SameText(string? a, string? b) =>
+        string.Equals(a?.Trim(), b?.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private async Task<PlaybackSnapshot?> GetPlaybackSnapshotCoreAsync(CancellationToken cancellationToken)
     {
         try
         {
             var manager = await GetManagerAsync();
             var sessions = SafeGetSessions(manager);
+            ObserveSessions(sessions);
             var currentSession = SafeGetCurrentSession(manager);
             var selectedSession = ResolveSession(currentSession, sessions);
 
@@ -131,7 +187,9 @@ public sealed class SmtcNowPlayingService : INowPlayingService
                 return null;
             }
 
-            if (TryGetFreshCachedTrackInfo(sessionId, out var cachedTrackInfo))
+            var forceMetadata = metadataInvalidated;
+            metadataInvalidated = false;
+            if (!forceMetadata && TryGetFreshCachedTrackInfo(sessionId, out var cachedTrackInfo))
             {
                 var snapshotTrack = cachedTrackInfo with
                 {
@@ -150,7 +208,7 @@ public sealed class SmtcNowPlayingService : INowPlayingService
                 return snapshotFromMetadataCache;
             }
 
-            if (ShouldThrottleMetadataRequest(sessionId))
+            if (!forceMetadata && ShouldThrottleMetadataRequest(sessionId))
             {
                 var cached = TryBuildSnapshotFromCache(sessionId, position, isPlaying);
                 TraceSnapshotDecision(
@@ -189,7 +247,15 @@ public sealed class SmtcNowPlayingService : INowPlayingService
                 return cached;
             }
 
-            var artworkPath = await TryCacheArtworkAsync(mediaProperties, cancellationToken);
+            // Re-read (and re-write) the thumbnail only when the track actually changed.
+            var sameTrack = this.cachedTrackInfo is not null &&
+                string.Equals(cachedMetadataSessionId, sessionId, StringComparison.Ordinal) &&
+                string.Equals(this.cachedTrackInfo.Title, mediaProperties.Title, StringComparison.Ordinal) &&
+                string.Equals(this.cachedTrackInfo.Artist, mediaProperties.Artist ?? string.Empty, StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(this.cachedTrackInfo.ArtworkPath);
+            var artworkPath = sameTrack
+                ? this.cachedTrackInfo!.ArtworkPath
+                : await TryCacheArtworkAsync(mediaProperties, cancellationToken);
             var track = new TrackInfo(
                 mediaProperties.Title,
                 mediaProperties.Artist ?? string.Empty,
@@ -231,17 +297,69 @@ public sealed class SmtcNowPlayingService : INowPlayingService
 
     private Task<GlobalSystemMediaTransportControlsSessionManager> GetManagerAsync()
     {
-        managerTask ??= GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask();
+        if (managerTask is null)
+        {
+            managerTask = GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask();
+            _ = managerTask.ContinueWith(
+                t =>
+                {
+                    if (t.Status != TaskStatus.RanToCompletion)
+                    {
+                        return;
+                    }
+
+                    // Event-driven invalidation: a track/session change is picked up on the
+                    // very next poll instead of waiting for the metadata refresh interval.
+                    t.Result.SessionsChanged += (_, _) => InvalidateMetadata();
+                    t.Result.CurrentSessionChanged += (_, _) => InvalidateMetadata();
+                },
+                TaskScheduler.Default);
+        }
+
         return managerTask;
+    }
+
+    private void InvalidateMetadata()
+    {
+        metadataInvalidated = true;
+    }
+
+    private void ObserveSessions(IReadOnlyList<GlobalSystemMediaTransportControlsSession> sessions)
+    {
+        foreach (var session in sessions)
+        {
+            if (!observedSessions.Add(session))
+            {
+                continue;
+            }
+
+            try
+            {
+                session.MediaPropertiesChanged += (_, _) => InvalidateMetadata();
+                session.PlaybackInfoChanged += (_, _) => InvalidateMetadata();
+            }
+            catch
+            {
+                // Some sessions refuse event subscription; polling still covers them.
+            }
+        }
+
+        if (observedSessions.Count > 32)
+        {
+            observedSessions.RemoveWhere(s => !sessions.Contains(s));
+        }
     }
 
     private GlobalSystemMediaTransportControlsSession? ResolveSession(
         GlobalSystemMediaTransportControlsSession? currentSession,
         IReadOnlyList<GlobalSystemMediaTransportControlsSession> sessions)
     {
+        // Windows' "current" session wins only when it is a playing non-browser player;
+        // otherwise score every session so a playing music app beats a browser tab.
         if (currentSession is not null &&
             TryGetPlaybackStatus(currentSession, out var currentStatus) &&
-            currentStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+            currentStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing &&
+            !ContainsMarker((currentSession.SourceAppUserModelId ?? string.Empty).ToLowerInvariant(), BrowserSessionMarkers))
         {
             return currentSession;
         }

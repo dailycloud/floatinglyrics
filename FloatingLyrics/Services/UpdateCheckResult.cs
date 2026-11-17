@@ -16,4 +16,5 @@ public sealed record UpdateCheckResult(
     Version? LatestVersion = null,
     string ReleaseUrl = "",
     string ReleaseTitle = "",
-    DateTimeOffset? PublishedAtUtc = null);
+    DateTimeOffset? PublishedAtUtc = null,
+    string? AssetUrl = null);

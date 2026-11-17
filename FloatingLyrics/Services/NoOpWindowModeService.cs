@@ -56,4 +56,9 @@ public sealed class NoOpWindowModeService : IWindowModeService
     {
         return true;
     }
+
+    public bool EnsureWallpaperAttachment()
+    {
+        return false;
+    }
 }

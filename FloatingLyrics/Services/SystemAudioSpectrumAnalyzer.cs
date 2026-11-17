@@ -41,7 +41,6 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
     private DateTimeOffset lastRoutingRefreshUtc = DateTimeOffset.MinValue;
     private DateTimeOffset lastPeakRefreshUtc = DateTimeOffset.MinValue;
     private float lastPeakValue;
-    private bool hasLastPeakValue;
     private float appScopedGate = 1f;
     private bool appScopedGateInitialized;
     private string captureRouteDescription = "system-loopback";
@@ -103,11 +102,22 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
 
         lock (routeGate)
         {
-            hasLastPeakValue = false;
             appScopedGate = 1f;
             appScopedGateInitialized = false;
             DisposeSessionEndpointLocked();
             captureRouteDescription = "system-loopback";
+        }
+    }
+
+    /// <summary>Current app-focus gain (1 = plain system loopback), for diagnostics.</summary>
+    public float CurrentGate
+    {
+        get
+        {
+            lock (routeGate)
+            {
+                return appScopedGate;
+            }
         }
     }
 
@@ -134,7 +144,6 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
             preferredProcessIds.Clear();
             lastRoutingRefreshUtc = DateTimeOffset.MinValue;
             lastPeakRefreshUtc = DateTimeOffset.MinValue;
-            hasLastPeakValue = false;
             appScopedGate = 1f;
             appScopedGateInitialized = false;
             RefreshPreferredRoutingLocked(force: true);
@@ -193,7 +202,8 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
                 maxValue = MathF.Max(maxValue, snapshot[bin]);
             }
 
-            result[i] = Math.Clamp(maxValue, 0f, 1f);
+            // Guard against NaN/∞ from degenerate capture buffers: one NaN poisons everything downstream.
+            result[i] = float.IsFinite(maxValue) ? Math.Clamp(maxValue, 0f, 1f) : 0f;
         }
 
         var gateGain = GetAppScopedGate();
@@ -220,8 +230,10 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
                 return 1f;
             }
 
+            // Throttle session metering regardless of whether the last read succeeded: these are
+            // cross-process COM calls and used to run every frame when the player was not found.
             var now = DateTimeOffset.UtcNow;
-            if (hasLastPeakValue && now - lastPeakRefreshUtc < PeakRefreshInterval)
+            if (now - lastPeakRefreshUtc < PeakRefreshInterval)
             {
                 return appScopedGate;
             }
@@ -229,9 +241,10 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
             var peak = ReadCurrentPeakForTargetProcessesLocked();
             if (!peak.HasValue)
             {
-                appScopedGate = appScopedGateInitialized
-                    ? Math.Clamp(appScopedGate * 0.86f, 0f, 1f)
-                    : 1f;
+                // The player's audio session could not be metered (e.g. Spotify renders from a
+                // child process or another device): fall back to the plain system loopback
+                // instead of gating the visualizer down to silence.
+                appScopedGate += (1f - appScopedGate) * 0.25f;
                 appScopedGateInitialized = true;
                 return appScopedGate;
             }
@@ -346,7 +359,6 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
         EnsureSessionEndpointLocked();
         if (renderDevice is null || preferredProcessIds.Count == 0)
         {
-            hasLastPeakValue = false;
             return null;
         }
 
@@ -374,50 +386,18 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
                 }
             }
 
+            // Not found: the periodic routing refresh (every RoutingRefreshInterval) re-resolves
+            // the player's processes; no forced re-route per frame.
             if (!found)
             {
-                // Process changed/restarted: attempt re-route once, then retry.
-                RefreshPreferredRoutingLocked(force: true);
-                if (preferredProcessIds.Count == 0)
-                {
-                    hasLastPeakValue = false;
-                    return null;
-                }
-
-                renderDevice.AudioSessionManager.RefreshSessions();
-                sessions = renderDevice.AudioSessionManager.Sessions;
-                for (var i = 0; i < sessions.Count; i++)
-                {
-                    var session = sessions[i];
-                    if (!preferredProcessIds.Contains(session.GetProcessID))
-                    {
-                        continue;
-                    }
-
-                    try
-                    {
-                        maxPeak = Math.Max(maxPeak, session.AudioMeterInformation.MasterPeakValue);
-                        found = true;
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-
-            if (!found)
-            {
-                hasLastPeakValue = false;
                 return null;
             }
 
             lastPeakValue = maxPeak;
-            hasLastPeakValue = true;
             return maxPeak;
         }
         catch
         {
-            hasLastPeakValue = false;
             return null;
         }
     }

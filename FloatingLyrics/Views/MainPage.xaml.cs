@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Input;
+using FloatingLyrics.Controls;
 using FloatingLyrics.Models;
 using FloatingLyrics.Services;
 using Microsoft.UI.Input;
@@ -23,9 +24,6 @@ namespace FloatingLyrics.Views;
 
 public sealed partial class MainPage : Page
 {
-    private const int SettingsFlyoutWidth = 276;
-    private const int SettingsFlyoutHeight = 460;
-    private const int SettingsFlyoutGap = 18;
     private const int GwlExStyle = -20;
     private const nint WsExLayered = 0x00080000;
     private const nint WsExTransparent = 0x00000020;
@@ -77,18 +75,11 @@ public sealed partial class MainPage : Page
     private static readonly Duration CoverHideDuration = new(TimeSpan.FromMilliseconds(210));
 
     private bool isDraggingWindow;
-    private bool isDraggingSettingsFlyout;
-    private bool isSettingsFlyoutOpen;
     private bool isWindowClickThroughEnabled;
-    private bool hasSettingsFlyoutOffset;
     private uint draggingPointerId;
-    private uint settingsFlyoutDraggingPointerId;
     private Point dragStartOverlayOffset;
-    private Point settingsFlyoutOffset;
     private Point dragStartPointerPositionInRoot;
     private DragAxisLockMode dragAxisLockMode;
-    private NativePoint dragStartSettingsCursorPosition;
-    private Point dragStartSettingsOffset;
     private nint hwnd;
     private DispatcherQueueTimer? clickThroughTimer;
     private DispatcherQueueTimer? debugOverlayTimer;
@@ -124,8 +115,9 @@ public sealed partial class MainPage : Page
     private readonly SolidColorBrush nextLineMainBrush = new();
     private readonly SolidColorBrush lineShadowBrush = new();
     private readonly SolidColorBrush currentLineShadowBrush = new();
-    private readonly FontFamily currentLineFontFamily = new("Segoe UI Variable Text");
-    private readonly FontFamily nextLineFontFamily = new("Segoe UI Variable Text");
+    private FontFamily currentLineFontFamily = new("Segoe UI Variable Text");
+    private FontFamily nextLineFontFamily = new("Segoe UI Variable Text");
+    private Windows.UI.Text.FontWeight lyricsFontWeight = FontWeights.SemiBold;
     private readonly SystemAudioSpectrumAnalyzer audioSpectrumAnalyzer = new();
     private DispatcherQueueTimer? physicalTrackFadeTimer;
     private int visualizerPointCount = VisualizerPointCountDefault;
@@ -162,7 +154,30 @@ public sealed partial class MainPage : Page
         public required SolidColorBrush MainBrush { get; init; }
         public required SolidColorBrush ShadowBrush { get; init; }
         public required ScaleTransform Scale { get; init; }
+        public required TranslateTransform Offset { get; init; }
         public bool IsVisualizer { get; init; }
+
+        // Spring state (see MainPage.LyricsMotion.cs). Fields, not properties: springs are
+        // mutable structs stepped in place every frame.
+        public Spring OffsetY = new(0, 170, 26, 0.05);
+        public Spring Active = new(0, 190, 28, 0.001);
+        public double ActiveScale = 1;
+        public double PendingOffset;
+        public double PendingActive;
+        public double StartAt;
+        public bool HasPending;
+        public bool IsExiting;
+        public bool OverlapActive;
+        public double ExitScale = 1;
+
+        // Win2D text layout used by the sub-pixel renderer (MainPage.LyricsText.cs).
+        public Microsoft.Graphics.Canvas.Text.CanvasTextLayout? TextLayout;
+        public string? TextLayoutKey;
+        public Microsoft.Graphics.Canvas.Text.CanvasTextLayout? BackgroundLayout;
+        public string? BackgroundLayoutKey;
+
+        // Source line (carries word/syllable timing when available).
+        public LyricLine? Line;
     }
 
     private sealed class VisualizerBarVisual
@@ -172,7 +187,7 @@ public sealed partial class MainPage : Page
         public required double FrequencyRatio { get; init; }
     }
 
-    private readonly record struct PhysicalTrackEntry(string Text, bool IsVisualizer);
+    private readonly record struct PhysicalTrackEntry(string Text, bool IsVisualizer, LyricLine? Line = null);
 
     private readonly record struct PhysicalTrackPlan(
         IReadOnlyList<PhysicalTrackEntry> Entries,
@@ -232,7 +247,6 @@ public sealed partial class MainPage : Page
             appWindow = ResolveAppWindow();
             hwnd = ResolveWindowHandle();
         });
-        RunLoadedStep("attach-settings-events", AttachSettingsFlyoutEvents);
         RunLoadedStep("apply-line-layout", () =>
         {
             ApplyNextLineMargin();
@@ -242,6 +256,7 @@ public sealed partial class MainPage : Page
             LyricVisualizerHost.SizeChanged += LyricVisualizerHost_OnSizeChanged;
             RootGrid.SizeChanged += RootGrid_OnSizeChanged;
         });
+        RunLoadedStep("lyrics-text-overlay", InitializeLyricsTextOverlay);
         RunLoadedStep("initialize-mode-state", () =>
         {
             UpdatePhysicalTrackMode();
@@ -256,6 +271,7 @@ public sealed partial class MainPage : Page
             StartClickThroughTimer();
             UpdateWindowClickThroughMode();
         });
+        RunLoadedStep("liquid-glass", InitializeGlass);
         RunLoadedStep("debug-overlay", UpdateDebugOverlayState);
         RunLoadedStep("startup-window-state", () =>
         {
@@ -404,8 +420,10 @@ public sealed partial class MainPage : Page
     {
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         startupWindowStateApplied = false;
-        DetachSettingsFlyoutEvents();
-        EndSettingsFlyoutDrag();
+        TeardownGlass();
+        StopLyricsLoop();
+        StopWordTicker();
+        TeardownLyricsTextOverlay();
         ViewModel.SetOverlayResizeDeferred(false);
         StopActiveLineTransition();
         isLineTransitionRunning = false;
@@ -417,6 +435,7 @@ public sealed partial class MainPage : Page
         StopCoverPresentationAnimation();
         StopWaitingDotsAnimation();
         StopActivePhysicalTrackTransition();
+        StopLyricsLoop();
         StopPhysicalTrackFadeTimer();
         physicalLyricItems.Clear();
         LyricsTrackSurface.Children.Clear();
@@ -448,6 +467,16 @@ public sealed partial class MainPage : Page
 
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (IsGlassSettingProperty(e.PropertyName))
+        {
+            var glassProperty = e.PropertyName;
+            _ = DispatcherQueue.TryEnqueue(() => OnGlassSettingChanged(glassProperty));
+            if (e.PropertyName is not (nameof(MainViewModel.LyricsTextAlignment) or nameof(MainViewModel.AutoLyricsTextAlignment)))
+            {
+                return;
+            }
+        }
+
         if (e.PropertyName == nameof(MainViewModel.LineAnimationVersion))
         {
             _ = DispatcherQueue.TryEnqueue(QueueLineTransition);
@@ -553,7 +582,18 @@ public sealed partial class MainPage : Page
                 ApplyLineBrushPalette();
                 if (ShouldUsePhysicalTrack())
                 {
-                    ApplyPhysicalTrackFinalState(GetActivePhysicalPlanIndex());
+                    if (isLyricsLoopActive)
+                    {
+                        // Never snap a running transition: just recolour from the springs.
+                        foreach (var item in physicalLyricItems)
+                        {
+                            ApplyPhysicalItemVisual(item);
+                        }
+                    }
+                    else
+                    {
+                        ApplyPhysicalTrackFinalState(GetActivePhysicalPlanIndex());
+                    }
                 }
             });
             return;
@@ -974,8 +1014,22 @@ public sealed partial class MainPage : Page
                 continue;
             }
 
-            ApplyTextPlacement(item.MainText, item.ShadowText, layout);
+            // Duets: the second voice sits on the opposite side (centre stays centre).
+            var itemLayout = item.Line is { IsOppositeAligned: true }
+                ? layout with
+                {
+                    Mode = layout.Mode switch
+                    {
+                        LyricsTextAlignmentMode.Left => LyricsTextAlignmentMode.Right,
+                        LyricsTextAlignmentMode.Right => LyricsTextAlignmentMode.Left,
+                        _ => layout.Mode
+                    }
+                }
+                : layout;
+            ApplyTextPlacement(item.MainText, item.ShadowText, itemLayout);
         }
+
+        InvalidateLyricsText();
     }
 
     private void ApplyPreRollAlignment(LyricsHorizontalLayout layout)
@@ -1129,14 +1183,14 @@ public sealed partial class MainPage : Page
         SetElementWidthIfNeeded(LyricVisualizerHost, visualizerWidth);
         SetElementWidthIfNeeded(LyricsCanvas, contentWidth);
         SetElementWidthIfNeeded(PreRollHost, contentWidth);
-        SetElementWidthIfNeeded(DragHandle, dragWidth);
+        SetElementWidthIfNeeded(DragHandle, GrabberWidth);
         ApplyCurrentHorizontalLayoutSnapshot();
     }
 
     private void AnimateOverlayGeometry(double contentWidth, double dragWidth, double visualizerWidth)
     {
         var contentDelta = Math.Abs(ResolveElementWidth(OverlayContentHost, contentWidth) - contentWidth);
-        var dragDelta = Math.Abs(ResolveElementWidth(DragHandle, dragWidth) - dragWidth);
+        var dragDelta = Math.Abs(ResolveElementWidth(DragHandle, GrabberWidth) - GrabberWidth);
         var visualizerDelta = Math.Abs(ResolveElementWidth(LyricVisualizerHost, visualizerWidth) - visualizerWidth);
         if (contentDelta < 0.75 && dragDelta < 0.75 && visualizerDelta < 0.75)
         {
@@ -1153,7 +1207,7 @@ public sealed partial class MainPage : Page
         AddWidthAnim(storyboard, LyricVisualizerHost, visualizerWidth, OverlayGeometryAnimationDuration, easing);
         AddWidthAnim(storyboard, LyricsCanvas, contentWidth, OverlayGeometryAnimationDuration, easing);
         AddWidthAnim(storyboard, PreRollHost, contentWidth, OverlayGeometryAnimationDuration, easing);
-        AddWidthAnim(storyboard, DragHandle, dragWidth, OverlayGeometryAnimationDuration, easing);
+        AddWidthAnim(storyboard, DragHandle, GrabberWidth, OverlayGeometryAnimationDuration, easing);
 
         if (storyboard.Children.Count == 0)
         {
@@ -1279,7 +1333,7 @@ public sealed partial class MainPage : Page
         var probe = new TextBlock
         {
             FontFamily = currentLineFontFamily,
-            FontWeight = FontWeights.SemiBold,
+            FontWeight = lyricsFontWeight,
             FontSize = ViewModel.CurrentLineFontSize,
             TextWrapping = TextWrapping.NoWrap,
             TextTrimming = TextTrimming.None
@@ -1483,13 +1537,10 @@ public sealed partial class MainPage : Page
 
     private void DragHandle_OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        var point = e.GetCurrentPoint(DragHandle);
+        var point = e.GetCurrentPoint(OverlayRootHost);
         if (point.Properties.IsRightButtonPressed)
         {
-            if (!SettingsSubprocessLauncher.TryLaunch())
-            {
-                ShowSettingsFlyout();
-            }
+            ToggleSettingsPanel();
             e.Handled = true;
             return;
         }
@@ -1507,69 +1558,17 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        // The whole widget surface is a drag area; the drag only starts after a small movement
+        // so a simple click does not flash the snap grid.
+        anchorStoryboard?.Stop();
+        isAnchorAnimating = false;
         dragStartPointerPositionInRoot = e.GetCurrentPoint(RootGrid).Position;
+        dragPressPointInRoot = dragStartPointerPositionInRoot;
         dragStartOverlayOffset = new Point(OverlayRootHostTranslate.X, OverlayRootHostTranslate.Y);
         dragAxisLockMode = DragAxisLockMode.None;
         draggingPointerId = e.Pointer.PointerId;
-        isDraggingWindow = DragHandle.CapturePointer(e.Pointer);
-        if (isDraggingWindow)
-        {
-            ShowDragSnapOverlay();
-            UpdateDragSnapHint(DragAxisLockMode.None, isBypassed: false);
-        }
+        isDragPending = OverlayRootHost.CapturePointer(e.Pointer);
         e.Handled = true;
-    }
-
-    private void ShowSettingsFlyout()
-    {
-        appWindow ??= ResolveAppWindow();
-        if (appWindow is null || DragHandle.ContextFlyout is not Flyout settingsFlyout)
-        {
-            return;
-        }
-
-        if (settingsFlyout.IsOpen)
-        {
-            settingsFlyout.Hide();
-        }
-
-        if (!hasSettingsFlyoutOffset)
-        {
-            var rootWidth = RootGrid.ActualWidth > 1
-                ? RootGrid.ActualWidth
-                : appWindow.Size.Width;
-            var openOnRight = ShouldOpenSettingsOnRight(appWindow);
-            var x = openOnRight
-                ? rootWidth + SettingsFlyoutGap
-                : -SettingsFlyoutWidth - SettingsFlyoutGap;
-            var y = 8.0;
-            if (ViewModel.ShowDragHandle && DragHandle.Visibility == Visibility.Visible)
-            {
-                var dragHandlePosition = DragHandle.TransformToVisual(RootGrid).TransformPoint(new Point(0, 0));
-                y = Math.Max(2, dragHandlePosition.Y - 8);
-            }
-
-            settingsFlyoutOffset = new Point(x, y);
-            hasSettingsFlyoutOffset = true;
-        }
-
-        settingsFlyoutOffset = ClampSettingsFlyoutOffset(settingsFlyoutOffset);
-
-        var options = new FlyoutShowOptions
-        {
-            Position = settingsFlyoutOffset,
-            ShowMode = FlyoutShowMode.Standard
-        };
-
-        settingsFlyout.ShowAt(RootGrid, options);
-    }
-
-    private void CloseSettingsButton_OnClick(object sender, RoutedEventArgs e)
-    {
-        if (DragHandle.ContextFlyout is Flyout settingsFlyout)
-        {
-            settingsFlyout.Hide();
-        }
     }
 
     private static void ExecuteCommand(ICommand? command)
@@ -1630,112 +1629,28 @@ public sealed partial class MainPage : Page
         ExecuteCommand(ViewModel.ResetAllSettingsCommand);
     }
 
-    private void SettingsFlyoutHeader_OnPointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (!isSettingsFlyoutOpen || !e.GetCurrentPoint(SettingsFlyoutHeader).Properties.IsLeftButtonPressed)
-        {
-            return;
-        }
-
-        if (!GetCursorPos(out dragStartSettingsCursorPosition))
-        {
-            return;
-        }
-
-        settingsFlyoutDraggingPointerId = e.Pointer.PointerId;
-        dragStartSettingsOffset = settingsFlyoutOffset;
-        isDraggingSettingsFlyout = SettingsFlyoutHeader.CapturePointer(e.Pointer);
-        if (isDraggingSettingsFlyout)
-        {
-            SetWindowClickThrough(false);
-        }
-
-        e.Handled = isDraggingSettingsFlyout;
-    }
-
-    private void SettingsFlyoutHeader_OnPointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (!isDraggingSettingsFlyout || e.Pointer.PointerId != settingsFlyoutDraggingPointerId)
-        {
-            return;
-        }
-
-        var point = e.GetCurrentPoint(SettingsFlyoutHeader);
-        if (!point.Properties.IsLeftButtonPressed)
-        {
-            EndSettingsFlyoutDrag();
-            e.Handled = true;
-            return;
-        }
-
-        if (!GetCursorPos(out var currentCursor))
-        {
-            return;
-        }
-
-        var deltaX = currentCursor.X - dragStartSettingsCursorPosition.X;
-        var deltaY = currentCursor.Y - dragStartSettingsCursorPosition.Y;
-        settingsFlyoutOffset = ClampSettingsFlyoutOffset(new Point(
-            dragStartSettingsOffset.X + deltaX,
-            dragStartSettingsOffset.Y + deltaY));
-        if (SettingsFlyoutDragTransform is not null)
-        {
-            SettingsFlyoutDragTransform.X = deltaX;
-            SettingsFlyoutDragTransform.Y = deltaY;
-        }
-        hasSettingsFlyoutOffset = true;
-        e.Handled = true;
-    }
-
-    private void SettingsFlyoutHeader_OnPointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        if (!isDraggingSettingsFlyout || e.Pointer.PointerId != settingsFlyoutDraggingPointerId)
-        {
-            return;
-        }
-
-        if (SettingsFlyoutDragTransform is not null)
-        {
-            SettingsFlyoutDragTransform.X = 0;
-            SettingsFlyoutDragTransform.Y = 0;
-        }
-        EndSettingsFlyoutDrag();
-        ReopenSettingsFlyoutAtCurrentOffset();
-        e.Handled = true;
-    }
-
-    public void OpenSettingsFlyoutFromTray()
-    {
-        _ = DispatcherQueue.TryEnqueue(() =>
-        {
-            if (SettingsSubprocessLauncher.TryLaunch())
-            {
-                return;
-            }
-
-            SetWindowClickThrough(false);
-            ShowSettingsFlyout();
-            UpdateWindowClickThroughMode();
-        });
-    }
-
-    private static bool ShouldOpenSettingsOnRight(AppWindow window)
-    {
-        var displayArea = DisplayArea.GetFromWindowId(window.Id, DisplayAreaFallback.Primary);
-        var workArea = displayArea.WorkArea;
-        var leftSpace = window.Position.X - workArea.X;
-        var rightSpace = workArea.X + workArea.Width - (window.Position.X + window.Size.Width);
-        return rightSpace >= SettingsFlyoutWidth + SettingsFlyoutGap || rightSpace >= leftSpace;
-    }
-
     private void DragHandle_OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
+        if (isDragPending && !isDraggingWindow && e.Pointer.PointerId == draggingPointerId)
+        {
+            var position = e.GetCurrentPoint(RootGrid).Position;
+            var dx = position.X - dragPressPointInRoot.X;
+            var dy = position.Y - dragPressPointInRoot.Y;
+            if ((dx * dx) + (dy * dy) >= DragStartThreshold * DragStartThreshold)
+            {
+                isDraggingWindow = true;
+                ShowDragSnapOverlay();
+                UpdateDragSnapHint(DragAxisLockMode.None, isBypassed: false);
+                EnsureGlassRenderLoop();
+            }
+        }
+
         if (!isDraggingWindow || e.Pointer.PointerId != draggingPointerId)
         {
             return;
         }
 
-        var point = e.GetCurrentPoint(DragHandle);
+        var point = e.GetCurrentPoint(OverlayRootHost);
         if (!point.Properties.IsLeftButtonPressed)
         {
             EndWindowDrag();
@@ -1787,6 +1702,7 @@ public sealed partial class MainPage : Page
         target = ClampOverlayRootOffset(target);
         ApplyOverlayRootOffset(target, persist: false);
         UpdateDragSnapHint(effectiveAxis, bypassSnap);
+        RequestGlassFrame();
         e.Handled = true;
     }
 
@@ -1816,9 +1732,10 @@ public sealed partial class MainPage : Page
         }
 
         isDraggingWindow = false;
+        isDragPending = false;
         dragAxisLockMode = DragAxisLockMode.None;
         draggingPointerId = 0;
-        DragHandle.ReleasePointerCaptures();
+        OverlayRootHost.ReleasePointerCaptures();
         HideDragSnapOverlay();
         UpdateWindowClickThroughMode();
     }
@@ -1968,49 +1885,6 @@ public sealed partial class MainPage : Page
         }
     }
 
-    private void EndSettingsFlyoutDrag()
-    {
-        isDraggingSettingsFlyout = false;
-        settingsFlyoutDraggingPointerId = 0;
-        SettingsFlyoutHeader?.ReleasePointerCaptures();
-        UpdateWindowClickThroughMode();
-    }
-
-    private Point ClampSettingsFlyoutOffset(Point offset)
-    {
-        appWindow ??= ResolveAppWindow();
-        var rootWidth = RootGrid.ActualWidth > 1
-            ? RootGrid.ActualWidth
-            : appWindow?.Size.Width ?? SettingsFlyoutWidth;
-        var rootHeight = RootGrid.ActualHeight > 1
-            ? RootGrid.ActualHeight
-            : appWindow?.Size.Height ?? SettingsFlyoutHeight;
-
-        var minX = -GetSettingsFlyoutWidth() - 48;
-        var maxX = rootWidth + 48;
-        var minY = 0.0;
-        var maxY = Math.Max(0.0, rootHeight - Math.Min(rootHeight, GetSettingsFlyoutHeight()) + 24);
-        return new Point(
-            Math.Clamp(offset.X, minX, maxX),
-            Math.Clamp(offset.Y, minY, maxY));
-    }
-
-    private void ReopenSettingsFlyoutAtCurrentOffset()
-    {
-        if (!isSettingsFlyoutOpen || DragHandle.ContextFlyout is not Flyout settingsFlyout)
-        {
-            return;
-        }
-
-        settingsFlyout.Hide();
-        var options = new FlyoutShowOptions
-        {
-            Position = settingsFlyoutOffset,
-            ShowMode = FlyoutShowMode.Standard
-        };
-        settingsFlyout.ShowAt(RootGrid, options);
-    }
-
     private static nint ResolveWindowHandle()
     {
         if (Application.Current is not App app)
@@ -2031,82 +1905,6 @@ public sealed partial class MainPage : Page
 
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
         return AppWindow.GetFromWindowId(windowId);
-    }
-
-    private void AttachSettingsFlyoutEvents()
-    {
-        if (DragHandle.ContextFlyout is not Flyout settingsFlyout)
-        {
-            return;
-        }
-
-        settingsFlyout.Opened += SettingsFlyout_OnOpened;
-        settingsFlyout.Closed += SettingsFlyout_OnClosed;
-    }
-
-    private void DetachSettingsFlyoutEvents()
-    {
-        if (DragHandle.ContextFlyout is not Flyout settingsFlyout)
-        {
-            return;
-        }
-
-        settingsFlyout.Opened -= SettingsFlyout_OnOpened;
-        settingsFlyout.Closed -= SettingsFlyout_OnClosed;
-    }
-
-    private void SettingsFlyout_OnOpened(object? sender, object e)
-    {
-        isSettingsFlyoutOpen = true;
-        ViewModel.SetOverlayResizeDeferred(true);
-        UpdateWindowClickThroughMode();
-    }
-
-    private void SettingsFlyout_OnClosed(object? sender, object e)
-    {
-        if (SettingsFlyoutDragTransform is not null)
-        {
-            SettingsFlyoutDragTransform.X = 0;
-            SettingsFlyoutDragTransform.Y = 0;
-        }
-        EndSettingsFlyoutDrag();
-        isSettingsFlyoutOpen = false;
-        ViewModel.SetOverlayResizeDeferred(false);
-        UpdateWindowClickThroughMode();
-    }
-
-    private ScreenRect GetDragHandleScreenBounds()
-    {
-        if (!ViewModel.ShowDragHandle || DragHandle.Visibility != Visibility.Visible)
-        {
-            return new ScreenRect(0, 0, 0, 0);
-        }
-
-        var position = DragHandle.TransformToVisual(RootGrid).TransformPoint(new Point(0, 0));
-        var x = appWindow!.Position.X + (int)Math.Round(position.X);
-        var y = appWindow.Position.Y + (int)Math.Round(position.Y);
-        var width = (int)Math.Ceiling(Math.Max(DragHandle.ActualWidth, 1));
-        var height = (int)Math.Ceiling(Math.Max(DragHandle.ActualHeight, 1));
-        return new ScreenRect(x, y, width, height);
-    }
-
-    private ScreenRect GetSettingsFlyoutScreenBounds()
-    {
-        var x = appWindow!.Position.X + (int)Math.Round(settingsFlyoutOffset.X);
-        var y = appWindow.Position.Y + (int)Math.Round(settingsFlyoutOffset.Y);
-        return new ScreenRect(x, y, GetSettingsFlyoutWidth(), GetSettingsFlyoutHeight());
-    }
-
-    private int GetSettingsFlyoutWidth()
-    {
-        var measured = SettingsFlyoutRoot?.ActualWidth ?? 0;
-        return (int)Math.Ceiling(Math.Max(SettingsFlyoutWidth, measured));
-    }
-
-    private int GetSettingsFlyoutHeight()
-    {
-        var measured = SettingsFlyoutRoot?.ActualHeight ?? 0;
-        return (int)Math.Ceiling(Math.Max(320, Math.Min(SettingsFlyoutHeight, measured > 0 ? measured : SettingsFlyoutHeight)));
     }
 
     private void StartClickThroughTimer()
@@ -2996,6 +2794,7 @@ public sealed partial class MainPage : Page
 
         physicalTrackModeActive = active;
         LyricsTrackSurface.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        UpdateLyricsTextOverlayBounds();
         var legacyVisibility = active ? Visibility.Collapsed : Visibility.Visible;
         PreviousLineLayer.Visibility = legacyVisibility;
         CurrentLineLayer.Visibility = legacyVisibility;
@@ -3126,7 +2925,7 @@ public sealed partial class MainPage : Page
 
         foreach (var line in ViewModel.TimelineLines)
         {
-            entries.Add(new PhysicalTrackEntry(line.Text, IsVisualizer: false));
+            entries.Add(new PhysicalTrackEntry(line.Text, IsVisualizer: false, line));
         }
 
         if (entries.Count == 0)
@@ -3188,6 +2987,7 @@ public sealed partial class MainPage : Page
         {
             var item = physicalLyricItems[i];
             var entry = plan.Entries[i];
+            item.Line = entry.Line;
             if (!item.IsVisualizer)
             {
                 if (!string.Equals(item.MainText.Text, entry.Text, StringComparison.Ordinal))
@@ -3201,8 +3001,10 @@ public sealed partial class MainPage : Page
                 }
             }
 
-            Canvas.SetTop(item.Layer, i * physicalLineStep);
         }
+
+        RecomputePhysicalItemTops();
+        InvalidateLyricsText();
     }
 
     private bool NeedsPhysicalTrackRebuild(PhysicalTrackPlan plan)
@@ -3238,6 +3040,12 @@ public sealed partial class MainPage : Page
         var previousPlan = activePhysicalTrackPlan;
         var previousRenderedIndex = physicalRenderedIndex;
         StopActivePhysicalTrackTransition();
+        foreach (var oldItem in physicalLyricItems)
+        {
+            oldItem.TextLayout?.Dispose();
+            oldItem.BackgroundLayout?.Dispose();
+        }
+
         physicalLyricItems.Clear();
         LyricsTrackSurface.Children.Clear();
         physicalTrackVisualizerCanvas = null;
@@ -3245,6 +3053,7 @@ public sealed partial class MainPage : Page
 
         var plan = precomputedPlan ?? BuildPhysicalTrackPlan();
         activePhysicalTrackPlan = plan;
+        UpdateLyricsTextOverlayBounds();
         if (plan.Entries.Count == 0)
         {
             physicalTrackInitialized = false;
@@ -3260,11 +3069,18 @@ public sealed partial class MainPage : Page
         var canvasWidth = Math.Max(1, LyricsCanvas.ActualWidth);
         var trackSurfaceWidth = canvasWidth + PhysicalTrackLayerHorizontalOverflow;
         var clipPadX = PhysicalTrackClipHorizontalPadding;
-        var clipPadY = PhysicalTrackClipVerticalPadding;
+        // Vertical room for the feathered fade of the Win2D text overlay (no hard cut).
+        var clipPadY = Math.Max(PhysicalTrackClipVerticalPadding, lineBandHeight);
+
+        // Lines with background vocals need room for the smaller line underneath.
+        if (plan.Entries.Any(e => e.Line is { HasBackgroundVocals: true }))
+        {
+            viewportHeight += GetBackgroundLineHeight();
+        }
 
         LyricsCanvas.Height = viewportHeight;
         LyricsTrackSurface.Width = trackSurfaceWidth;
-        LyricsTrackSurface.Height = (plan.Entries.Count * physicalLineStep) + lineBandHeight;
+        LyricsTrackSurface.Height = (plan.Entries.Count * (physicalLineStep + GetBackgroundLineHeight())) + lineBandHeight;
         LyricsCanvas.Clip = new RectangleGeometry
         {
             Rect = new Rect(
@@ -3278,11 +3094,14 @@ public sealed partial class MainPage : Page
         {
             var item = CreatePhysicalLyricItem(plan.Entries[i], lineBandHeight, trackSurfaceWidth);
             physicalLyricItems.Add(item);
-            Canvas.SetTop(item.Layer, i * physicalLineStep);
             LyricsTrackSurface.Children.Add(item.Layer);
         }
 
+        RecomputePhysicalItemTops();
+
         ApplyCurrentHorizontalLayoutSnapshot();
+        UpdateLyricsTextOverlayBounds();
+        InvalidateLyricsText();
 
         visualizerLinesDirty = true;
         physicalTrackInitialized = true;
@@ -3306,12 +3125,14 @@ public sealed partial class MainPage : Page
         var shadowBrush = new SolidColorBrush(paletteShadowColor);
 
         var scale = new ScaleTransform { ScaleX = 1, ScaleY = 1 };
+        var offset = new TranslateTransform();
         var layer = new Grid
         {
             Width = width,
             Height = lineBandHeight,
             IsHitTestVisible = false,
-            Opacity = 1
+            Opacity = 1,
+            RenderTransform = offset
         };
 
         var contentHost = new Grid
@@ -3371,6 +3192,10 @@ public sealed partial class MainPage : Page
         {
             ApplyNextLineTypography(mainText, shadowText);
             SetTextLayerFontSize(mainText, shadowText, ViewModel.NextLineFontSize);
+
+            // Layout/measurement only: the glyphs are drawn by the sub-pixel Win2D overlay.
+            mainText.Opacity = 0;
+            shadowText.Opacity = 0;
             contentHost.Children.Add(shadowText);
             contentHost.Children.Add(mainText);
         }
@@ -3386,7 +3211,9 @@ public sealed partial class MainPage : Page
             MainBrush = mainBrush,
             ShadowBrush = shadowBrush,
             Scale = scale,
-            IsVisualizer = entry.IsVisualizer
+            Offset = offset,
+            IsVisualizer = entry.IsVisualizer,
+            Line = entry.Line
         };
     }
 
@@ -3427,49 +3254,16 @@ public sealed partial class MainPage : Page
 
         if (targetIndex == physicalRenderedIndex)
         {
-            ApplyPhysicalTrackFinalState(targetIndex);
+            // Already heading there: never snap a running spring animation.
+            if (!isLyricsLoopActive)
+            {
+                ApplyPhysicalTrackFinalState(targetIndex);
+            }
+
             return;
         }
 
-        StopActivePhysicalTrackTransition();
-
-        var oldIndex = physicalRenderedIndex;
-        var oldItem = physicalLyricItems[oldIndex];
-        var newItem = physicalLyricItems[targetIndex];
-        var newActiveScale = GetPhysicalItemActiveScale(newItem);
-        var distanceSteps = Math.Abs(targetIndex - oldIndex);
-        var durationSeconds = Math.Clamp(
-            ViewModel.LineAnimationDurationSeconds * (0.75 + Math.Max(0, distanceSteps - 1) * 0.22),
-            0.12,
-            1.9);
-        var duration = TimeSpan.FromSeconds(durationSeconds);
-        var timelineDuration = new Duration(duration);
-        var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
-
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(MakeTranslateYAnim(
-            LyricsTrackTranslate,
-            LyricsTrackTranslate.Y,
-            -(targetIndex * physicalLineStep),
-            timelineDuration,
-            easing));
-
-        storyboard.Children.Add(MakeScaleAnim(oldItem.Scale, nameof(ScaleTransform.ScaleX), oldItem.Scale.ScaleX, 1, timelineDuration, easing));
-        storyboard.Children.Add(MakeScaleAnim(oldItem.Scale, nameof(ScaleTransform.ScaleY), oldItem.Scale.ScaleY, 1, timelineDuration, easing));
-        storyboard.Children.Add(MakeScaleAnim(newItem.Scale, nameof(ScaleTransform.ScaleX), newItem.Scale.ScaleX, newActiveScale, timelineDuration, easing));
-        storyboard.Children.Add(MakeScaleAnim(newItem.Scale, nameof(ScaleTransform.ScaleY), newItem.Scale.ScaleY, newActiveScale, timelineDuration, easing));
-
-        storyboard.Children.Add(MakeOpacityAnim(oldItem.ContentHost, oldItem.ContentHost.Opacity, 0, timelineDuration, easing));
-        storyboard.Children.Add(MakeOpacityAnim(newItem.ContentHost, newItem.ContentHost.Opacity, 1, timelineDuration, easing));
-        storyboard.Children.Add(MakeColorAnim(oldItem.MainBrush, oldItem.MainBrush.Color, palettePreviousColor, timelineDuration, easing));
-        storyboard.Children.Add(MakeColorAnim(newItem.MainBrush, newItem.MainBrush.Color, paletteCurrentColor, timelineDuration, easing));
-        storyboard.Children.Add(MakeColorAnim(oldItem.ShadowBrush, oldItem.ShadowBrush.Color, paletteShadowColor, timelineDuration, easing));
-        storyboard.Children.Add(MakeColorAnim(newItem.ShadowBrush, newItem.ShadowBrush.Color, EnhanceCurrentLineShadowColor(paletteShadowColor), timelineDuration, easing));
-
-        activePhysicalTrackStoryboard = storyboard;
-        activePhysicalTrackStoryboard.Completed += OnPhysicalTrackTransitionCompleted;
-        StartPhysicalTrackFadeTimer();
-        activePhysicalTrackStoryboard.Begin();
+        BeginPhysicalSpringTransition(targetIndex, physicalRenderedIndex);
     }
 
     private void StartPhysicalTrackIntroFromBottom(int targetIndex)
@@ -3481,42 +3275,7 @@ public sealed partial class MainPage : Page
 
         StopActivePhysicalTrackTransition();
         ApplyPhysicalTrackFinalState(targetIndex);
-
-        var clampedTarget = Math.Clamp(targetIndex, 0, physicalLyricItems.Count - 1);
-        var currentItem = physicalLyricItems[clampedTarget];
-        var nextItem = clampedTarget + 1 < physicalLyricItems.Count
-            ? physicalLyricItems[clampedTarget + 1]
-            : null;
-
-        var finalY = LyricsTrackTranslate.Y;
-        var introOffset = Math.Max(physicalLineStep, GetLineBandHeight());
-        LyricsTrackTranslate.Y = finalY + introOffset;
-
-        currentItem.ContentHost.Opacity = 0;
-        if (nextItem is not null)
-        {
-            nextItem.ContentHost.Opacity = 0;
-        }
-
-        var duration = new Duration(TimeSpan.FromSeconds(Math.Clamp(ViewModel.LineAnimationDurationSeconds * 0.9, 0.18, 0.5)));
-        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(MakeTranslateYAnim(
-            LyricsTrackTranslate,
-            LyricsTrackTranslate.Y,
-            finalY,
-            duration,
-            easing));
-        storyboard.Children.Add(MakeOpacityAnim(currentItem.ContentHost, 0, 1, duration, easing));
-        if (nextItem is not null)
-        {
-            storyboard.Children.Add(MakeOpacityAnim(nextItem.ContentHost, 0, 0.72, duration, easing));
-        }
-
-        activePhysicalTrackStoryboard = storyboard;
-        activePhysicalTrackStoryboard.Completed += OnPhysicalTrackTransitionCompleted;
-        StartPhysicalTrackFadeTimer();
-        activePhysicalTrackStoryboard.Begin();
+        BeginPhysicalSpringIntro(Math.Clamp(targetIndex, 0, physicalLyricItems.Count - 1));
     }
 
     private void ApplyPhysicalTrackFinalState(int targetIndex)
@@ -3530,20 +3289,11 @@ public sealed partial class MainPage : Page
         for (var i = 0; i < physicalLyricItems.Count; i++)
         {
             var item = physicalLyricItems[i];
-            var isCurrent = i == clamped;
             ApplyNextLineTypography(item.MainText, item.ShadowText);
             SetTextLayerFontSize(item.MainText, item.ShadowText, ViewModel.NextLineFontSize);
-            var activeScale = GetPhysicalItemActiveScale(item);
-            item.Scale.ScaleX = isCurrent ? activeScale : 1;
-            item.Scale.ScaleY = isCurrent ? activeScale : 1;
-            item.ContentHost.Opacity = isCurrent ? 1 : (i > clamped ? 0.72 : 0);
-            item.MainBrush.Color = isCurrent ? paletteCurrentColor : (i < clamped ? palettePreviousColor : paletteNextColor);
-            item.ShadowBrush.Color = isCurrent
-                ? EnhanceCurrentLineShadowColor(paletteShadowColor)
-                : paletteShadowColor;
         }
 
-        LyricsTrackTranslate.Y = -(clamped * physicalLineStep);
+        SnapPhysicalSprings(clamped);
         physicalRenderedIndex = clamped;
         ApplyPhysicalTrackAlignment(GetLyricsHorizontalLayout());
         UpdatePhysicalTrackViewportFade();
@@ -3617,7 +3367,7 @@ public sealed partial class MainPage : Page
 
         foreach (var item in physicalLyricItems)
         {
-            var top = Canvas.GetTop(item.Layer) + translateY;
+            var top = Canvas.GetTop(item.Layer) + translateY + item.Offset.Y;
             var bottom = top + item.Layer.Height;
 
             // Fade outside/near edges while keeping center lines untouched.
@@ -3633,6 +3383,8 @@ public sealed partial class MainPage : Page
 
             item.Layer.Opacity = Math.Clamp(edgeOpacity * clipOpacity, 0, 1);
         }
+
+        InvalidateLyricsText();
     }
 
     private static double SmoothStep01(double t)
@@ -3747,24 +3499,25 @@ public sealed partial class MainPage : Page
         CurrentLineLayer.Opacity = 1;
         NextLineLayer.Opacity = 0.72;
 
-        var duration = TimeSpan.FromSeconds(Math.Clamp(ViewModel.LineAnimationDurationSeconds, 0.25, 1.2));
+        var duration = TimeSpan.FromSeconds(Math.Clamp(ViewModel.LineAnimationDurationSeconds * LineMotionDurationScale, 0.25, 1.5));
         var timelineDuration = new Duration(duration);
         var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        var motion = CreateLineMotionEasing();
 
         var storyboard = new Storyboard();
 
         // --- CurrentLineLayer: едет вверх и исчезает ---
-        storyboard.Children.Add(MakeTranslateYAnim(CurrentLineTranslate, CurrentLineTranslate.Y, 0, timelineDuration, easing));
+        storyboard.Children.Add(MakeTranslateYAnim(CurrentLineTranslate, CurrentLineTranslate.Y, 0, timelineDuration, motion));
         storyboard.Children.Add(MakeOpacityAnim(CurrentLineLayer, 1, 0, timelineDuration, easing));
         storyboard.Children.Add(MakeColorAnim(currentLineMainBrush, paletteCurrentColor, palettePreviousColor, timelineDuration, easing));
 
         // --- NextLineLayer: едет вверх на место текущей и становится яркой ---
-        storyboard.Children.Add(MakeTranslateYAnim(NextLineTranslate, NextLineTranslate.Y, 0, timelineDuration, easing));
+        storyboard.Children.Add(MakeTranslateYAnim(NextLineTranslate, NextLineTranslate.Y, 0, timelineDuration, motion));
         storyboard.Children.Add(MakeOpacityAnim(NextLineLayer, 0.72, 1, timelineDuration, easing));
         storyboard.Children.Add(MakeColorAnim(nextLineMainBrush, paletteNextColor, paletteCurrentColor, timelineDuration, easing));
 
         // --- PreviousLineLayer: появляется снизу как новая следующая строка ---
-        storyboard.Children.Add(MakeTranslateYAnim(PreviousLineTranslate, PreviousLineTranslate.Y, 0, timelineDuration, easing));
+        storyboard.Children.Add(MakeTranslateYAnim(PreviousLineTranslate, PreviousLineTranslate.Y, 0, timelineDuration, motion));
         storyboard.Children.Add(MakeOpacityAnim(PreviousLineLayer, 0, 0.72, timelineDuration, easing));
         LyricsCanvas.Height = Math.Max(LyricsCanvas.Height, fromPrevTop + lineBandHeight + 4);
 
@@ -3864,34 +3617,35 @@ public sealed partial class MainPage : Page
         SetTextScale(NextLineTextScale, NextLineShadowTextScale, 1);
         SetTextScale(PreviousLineTextScale, PreviousLineShadowTextScale, 1);
 
-        var duration = TimeSpan.FromSeconds(Math.Clamp(ViewModel.LineAnimationDurationSeconds, 0.25, 1.2));
+        var duration = TimeSpan.FromSeconds(Math.Clamp(ViewModel.LineAnimationDurationSeconds * LineMotionDurationScale, 0.25, 1.5));
         var timelineDuration = new Duration(duration);
         var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
+        var motion = CreateLineMotionEasing();
 
         var storyboard = new Storyboard();
-        storyboard.Children.Add(MakeTranslateYAnim(CurrentLineTranslate, CurrentLineTranslate.Y, 0, timelineDuration, easing));
+        storyboard.Children.Add(MakeTranslateYAnim(CurrentLineTranslate, CurrentLineTranslate.Y, 0, timelineDuration, motion));
         AddLayerScaleAnim(
             storyboard,
             CurrentLineScale,
             1,
             shrinkToNextScale,
             timelineDuration,
-            easing);
+            motion);
         storyboard.Children.Add(MakeOpacityAnim(CurrentLineLayer, outgoingOpacity, 0, timelineDuration, easing));
         storyboard.Children.Add(MakeColorAnim(currentLineMainBrush, paletteCurrentColor, palettePreviousColor, timelineDuration, easing));
 
-        storyboard.Children.Add(MakeTranslateYAnim(NextLineTranslate, NextLineTranslate.Y, 0, timelineDuration, easing));
+        storyboard.Children.Add(MakeTranslateYAnim(NextLineTranslate, NextLineTranslate.Y, 0, timelineDuration, motion));
         AddLayerScaleAnim(
             storyboard,
             NextLineScale,
             1,
             growToCurrentScale,
             timelineDuration,
-            easing);
+            motion);
         storyboard.Children.Add(MakeOpacityAnim(NextLineLayer, incomingOpacityStart, incomingOpacityEnd, timelineDuration, easing));
         storyboard.Children.Add(MakeColorAnim(nextLineMainBrush, paletteNextColor, paletteCurrentColor, timelineDuration, easing));
 
-        storyboard.Children.Add(MakeTranslateYAnim(PreviousLineTranslate, PreviousLineTranslate.Y, 0, timelineDuration, easing));
+        storyboard.Children.Add(MakeTranslateYAnim(PreviousLineTranslate, PreviousLineTranslate.Y, 0, timelineDuration, motion));
         storyboard.Children.Add(MakeOpacityAnim(PreviousLineLayer, 0, upcomingOpacityEnd, timelineDuration, easing));
 
         LyricsCanvas.Height = Math.Max(LyricsCanvas.Height, fromPrevTop + lineBandHeight + 4);
@@ -4085,16 +3839,16 @@ public sealed partial class MainPage : Page
     {
         text.FontFamily = currentLineFontFamily;
         shadow.FontFamily = currentLineFontFamily;
-        text.FontWeight = FontWeights.Normal;
-        shadow.FontWeight = FontWeights.Normal;
+        text.FontWeight = lyricsFontWeight;
+        shadow.FontWeight = lyricsFontWeight;
     }
 
     private void ApplyNextLineTypography(TextBlock text, TextBlock shadow)
     {
         text.FontFamily = nextLineFontFamily;
         shadow.FontFamily = nextLineFontFamily;
-        text.FontWeight = FontWeights.Normal;
-        shadow.FontWeight = FontWeights.Normal;
+        text.FontWeight = lyricsFontWeight;
+        shadow.FontWeight = lyricsFontWeight;
     }
 
     private static void SetTextLayerFontSize(TextBlock text, TextBlock shadow, double size)
@@ -4305,7 +4059,7 @@ public sealed partial class MainPage : Page
                 }
 
                 visualizerTimer = queue.CreateTimer();
-                visualizerTimer.Interval = TimeSpan.FromMilliseconds(33);
+                visualizerTimer.Interval = TimeSpan.FromMilliseconds(16);
                 visualizerTimer.IsRepeating = true;
                 visualizerTimer.Tick += OnVisualizerTimerTick;
             }
@@ -4395,7 +4149,7 @@ public sealed partial class MainPage : Page
 
             EnsureVisualizerBuffers();
             EnsureVisualizerLines();
-            if (visualizerBarVisuals.Count == 0)
+            if (spectrumView is null || visualizerRatios.Length != visualizerLevels.Length)
             {
                 return;
             }
@@ -4439,35 +4193,50 @@ public sealed partial class MainPage : Page
             var maxHalfHeight = Math.Max(1.2, Math.Min(VisualizerMaxAmplitude, centerY - 1.6));
             var minHalfHeight = Math.Min(maxHalfHeight, Math.Max(0.8, VisualizerMinAmplitude));
 
-            for (var i = 0; i < visualizerBarVisuals.Count; i++)
+            // Automatic gain: a slowly decaying running peak normalises quiet captures (low system
+            // volume, app-focus gating) so the spectrum always uses its full height.
+            var frameMax = 0f;
+            for (var i = 0; i < visualizerLevels.Length; i++)
             {
-                var visual = visualizerBarVisuals[i];
-                var sampled = SampleSpectrumForBar(spectrum, visual.FrequencyRatio);
-                var level = Math.Clamp(sampled * sensitivity, 0f, 1f);
-                var smoothed = visualizerLevels[i] + ((level - visualizerLevels[i]) * responsiveness);
-                visualizerLevels[i] = smoothed;
-                visualizerPeakLevels[i] = Math.Max(smoothed, visualizerPeakLevels[i] * peakDecay);
-
-                var curved = Math.Clamp(MathF.Pow(smoothed, 0.84f), 0f, 1f);
-                var halfHeight = minHalfHeight + (curved * (maxHalfHeight - minHalfHeight));
-                var rectHeight = Math.Max(1.0, halfHeight * 2.0);
-                visual.Bar.Height = rectHeight;
-                Canvas.SetTop(visual.Bar, centerY - (rectHeight * 0.5));
-
-                var accentColor = EvaluateBarAccentColor(lowAccent, midAccent, highAccent, visual.FrequencyRatio);
-                var peakBoost = Math.Clamp((visualizerPeakLevels[i] - (smoothed * 0.58f)) * 2.1f, 0f, 1f);
-
-                // Minimeters-like behavior: each frequency bar is always colorized.
-                var baseColorStrength = Math.Clamp(0.68 + (colorIntensity * 0.30), 0, 1);
-                var baseTone = LerpColor(neutralBase, accentColor, baseColorStrength);
-
-                // Signal and peak add extra saturation/brightness, not the base color itself.
-                var levelBoost = Math.Clamp(Math.Pow(smoothed, 0.86) * 0.42, 0, 1);
-                var peakMix = Math.Clamp(Math.Pow(peakBoost, 0.72) * 0.72, 0, 1);
-                var energizedTone = LerpColor(baseTone, accentColor, Math.Clamp(0.24 + levelBoost + (peakMix * 0.35), 0, 1));
-                var flashMix = Math.Clamp(peakMix * 0.18, 0, 0.24);
-                visual.Brush.Color = LerpColor(energizedTone, whiteFlash, flashMix);
+                var sample = SampleSpectrumForBar(spectrum, visualizerRatios[i]) * sensitivity;
+                if (float.IsFinite(sample))
+                {
+                    frameMax = Math.Max(frameMax, sample);
+                }
             }
+
+            visualizerAgcPeak = Math.Max(frameMax, visualizerAgcPeak * 0.996f);
+            var agcGain = Math.Clamp(0.85f / Math.Max(visualizerAgcPeak, 0.05f), 1f, 6f);
+            if (visualizerDiagnosticsClock.Elapsed > TimeSpan.FromSeconds(10))
+            {
+                visualizerDiagnosticsClock.Restart();
+                DebugTrace.Write($"Visualizer: raw={frameMax:0.000} agcPeak={visualizerAgcPeak:0.000} gain={agcGain:0.0} gate={audioSpectrumAnalyzer.CurrentGate:0.00} route={audioSpectrumAnalyzer.CaptureRouteDescription}");
+            }
+
+            for (var i = 0; i < visualizerLevels.Length; i++)
+            {
+                var sampled = SampleSpectrumForBar(spectrum, visualizerRatios[i]);
+                var level = Math.Clamp(sampled * sensitivity * agcGain, 0f, 1f);
+                if (!float.IsFinite(level))
+                {
+                    level = 0f;
+                }
+
+                var previous = float.IsFinite(visualizerLevels[i]) ? visualizerLevels[i] : 0f;
+                var smoothed = previous + ((level - previous) * responsiveness);
+                visualizerLevels[i] = smoothed;
+                visualizerPeakLevels[i] = Math.Max(smoothed, (float.IsFinite(visualizerPeakLevels[i]) ? visualizerPeakLevels[i] : 0f) * peakDecay);
+            }
+
+            _ = colorIntensity;
+            _ = neutralBase;
+            _ = whiteFlash;
+            _ = centerY;
+            _ = maxHalfHeight;
+            _ = minHalfHeight;
+            PlaceSpectrumView(canvas);
+            spectrumView.OnLightBackdrop = ViewModel.UseDarkText;
+            spectrumView.SetFrame(visualizerLevels, visualizerPeakLevels, visualizerRatios, lowAccent, midAccent, highAccent, ViewModel.OscilloscopeMirrorBars);
         }
         catch (Exception ex)
         {
@@ -4517,7 +4286,10 @@ public sealed partial class MainPage : Page
                 visualizerLinesDirty = true;
             }
 
-            if (!visualizerLinesDirty && visualizerBarVisuals.Count == visualizerLevels.Length)
+            if (!visualizerLinesDirty &&
+                spectrumView is not null &&
+                ReferenceEquals(spectrumView.Parent, canvas) &&
+                visualizerRatios.Length == visualizerLevels.Length)
             {
                 return;
             }
@@ -4529,56 +4301,61 @@ public sealed partial class MainPage : Page
             visualizerBarVisuals.Clear();
 
             var barCount = Math.Max(2, visualizerLevels.Length);
-            var gap = VisualizerBarGap;
-            var drawableWidth = Math.Max(8, canvas.Width - 2);
-            var barWidth = (drawableWidth - (Math.Max(0, barCount - 1) * gap)) / barCount;
-            if (barWidth < VisualizerBarMinWidth)
-            {
-                barWidth = VisualizerBarMinWidth;
-                gap = Math.Max(0.6, (drawableWidth - (barWidth * barCount)) / Math.Max(1, barCount - 1));
-            }
-
-            var usedWidth = (barWidth * barCount) + (Math.Max(0, barCount - 1) * gap);
-            var startX = (canvas.Width - usedWidth) * 0.5;
-            var centerY = canvas.Height * 0.5;
-            var corner = Math.Clamp(barWidth * VisualizerBarCornerRatio, 1.2, 4.2);
-            var lowAccent = ViewModel.OscilloscopeLowAccentColor;
-            var midAccent = ViewModel.OscilloscopeMidAccentColor;
-            var highAccent = ViewModel.OscilloscopeHighAccentColor;
             var mirrorBars = ViewModel.OscilloscopeMirrorBars;
-            var baseTone = Color.FromArgb(255, 208, 208, 208);
+            visualizerRatios = new float[barCount];
             for (var i = 0; i < barCount; i++)
             {
-                var ratio = ComputeBarFrequencyRatio(i, barCount, mirrorBars);
-                var accent = EvaluateBarAccentColor(lowAccent, midAccent, highAccent, ratio);
-                var brush = new SolidColorBrush(LerpColor(baseTone, accent, 0.80));
-                var rect = new Rectangle
-                {
-                    Width = barWidth,
-                    Height = 2,
-                    RadiusX = corner,
-                    RadiusY = corner,
-                    Fill = brush,
-                    IsHitTestVisible = false
-                };
-
-                Canvas.SetLeft(rect, startX + (i * (barWidth + gap)));
-                Canvas.SetTop(rect, centerY - 1);
-                canvas.Children.Add(rect);
-
-                visualizerBarVisuals.Add(new VisualizerBarVisual
-                {
-                    Bar = rect,
-                    Brush = brush,
-                    FrequencyRatio = ratio
-                });
+                visualizerRatios[i] = (float)ComputeBarFrequencyRatio(i, barCount, mirrorBars);
             }
+
+            // One Win2D spectrum, sized to the visible text lane (not the padded track surface).
+            spectrumView = new SpectrumVisualizer { Height = canvas.Height };
+            canvas.Children.Add(spectrumView);
+            PlaceSpectrumView(canvas);
         }
         catch (Exception ex)
         {
             DebugTrace.Write($"EnsureVisualizerLines failed: {ex}");
             visualizerLinesDirty = true;
         }
+    }
+
+    private SpectrumVisualizer? spectrumView;
+    private float visualizerAgcPeak;
+    private readonly System.Diagnostics.Stopwatch visualizerDiagnosticsClock = System.Diagnostics.Stopwatch.StartNew();
+    private float[] visualizerRatios = [];
+
+    /// <summary>Positions the spectrum inside the text lane, following the lyrics alignment.</summary>
+    private void PlaceSpectrumView(Canvas canvas)
+    {
+        if (spectrumView is null)
+        {
+            return;
+        }
+
+        var laneWidth = ReferenceEquals(canvas, LyricVisualizerCanvas)
+            ? Math.Max(1, LyricVisualizerHost.ActualWidth)
+            : Math.Max(1, LyricsCanvas.ActualWidth);
+        var width = Math.Clamp(laneWidth - (OverlayTextEdgePadding * 2), 160, 760);
+        var left = ResolveEffectiveLyricsTextAlignmentMode() switch
+        {
+            LyricsTextAlignmentMode.Center => (laneWidth - width) / 2,
+            LyricsTextAlignmentMode.Right => laneWidth - width - OverlayTextEdgePadding,
+            _ => OverlayTextEdgePadding * 0.5
+        };
+
+        if (Math.Abs(spectrumView.Width - width) > 0.5 || double.IsNaN(spectrumView.Width))
+        {
+            spectrumView.Width = width;
+        }
+
+        if (Math.Abs(spectrumView.Height - canvas.Height) > 0.5 || double.IsNaN(spectrumView.Height))
+        {
+            spectrumView.Height = canvas.Height;
+        }
+
+        Canvas.SetLeft(spectrumView, Math.Max(0, left));
+        Canvas.SetTop(spectrumView, 0);
     }
 
     private static double ComputeBarFrequencyRatio(int index, int barCount, bool mirrored)
@@ -4652,50 +4429,25 @@ public sealed partial class MainPage : Page
 
     private void UpdateWindowClickThroughMode()
     {
+        // Interaction is driven by the liquid-glass hover logic (see MainPage.Glass.cs):
+        // the window is click-through everywhere except over the widget and the glass menu.
+        UpdateWidgetInteraction();
+    }
+
+    private void SetWindowClickThrough(bool enabled)
+    {
         if (hwnd == 0)
         {
             return;
         }
 
-        appWindow ??= ResolveAppWindow();
-        if (appWindow is null)
-        {
-            return;
-        }
+        // On the desktop the widget is a child of the shell window that owns the icon view.
+        // Windows does not skip the WinUI child windows of a WS_EX_TRANSPARENT *child* window
+        // during hit-testing, so click-through is done with z-order instead: below the
+        // (transparent) icon layer while idle, above it while the cursor is on the widget.
+        EnsureDesktopLayerOrder(interactive: !enabled);
 
-        if (isDraggingWindow || isDraggingSettingsFlyout)
-        {
-            SetWindowClickThrough(false);
-            return;
-        }
-
-        if (isSettingsFlyoutOpen)
-        {
-            SetWindowClickThrough(false);
-            return;
-        }
-
-        if (!GetCursorPos(out var cursor))
-        {
-            return;
-        }
-
-        var isOverHandle = ViewModel.ShowDragHandle &&
-            GetDragHandleScreenBounds().Contains(cursor.X, cursor.Y);
-        var isOverSettings = isSettingsFlyoutOpen &&
-            GetSettingsFlyoutScreenBounds().Contains(cursor.X, cursor.Y);
-        var shouldBeInteractive = ViewModel.ClickThroughMode switch
-        {
-            ClickThroughMode.Disabled => true,
-            ClickThroughMode.Always => isOverSettings,
-            _ => isOverHandle || isOverSettings
-        };
-        SetWindowClickThrough(!shouldBeInteractive);
-    }
-
-    private void SetWindowClickThrough(bool enabled)
-    {
-        if (isWindowClickThroughEnabled == enabled || hwnd == 0)
+        if (isWindowClickThroughEnabled == enabled)
         {
             return;
         }
@@ -4723,6 +4475,46 @@ public sealed partial class MainPage : Page
             SwpNomove | SwpNosize | SwpNozorder | SwpNoactivate | SwpFrameChanged);
         isWindowClickThroughEnabled = enabled;
     }
+
+    private void EnsureDesktopLayerOrder(bool interactive)
+    {
+        var parent = GetParent(hwnd);
+        if (parent == 0)
+        {
+            return;
+        }
+
+        var iconView = FindWindowEx(parent, 0, "SHELLDLL_DefView", null);
+        if (iconView == 0)
+        {
+            return;
+        }
+
+        if (interactive)
+        {
+            if (GetWindow(parent, GwChild) != hwnd)
+            {
+                _ = SetWindowPos(hwnd, 0, 0, 0, 0, 0, SwpNomove | SwpNosize | SwpNoactivate);
+            }
+        }
+        else if (GetWindow(iconView, GwHwndNext) != hwnd)
+        {
+            // Insert directly below the icon view (still above the wallpaper worker).
+            _ = SetWindowPos(hwnd, iconView, 0, 0, 0, 0, SwpNomove | SwpNosize | SwpNoactivate);
+        }
+    }
+
+    private const uint GwChild = 5;
+    private const uint GwHwndNext = 2;
+
+    [DllImport("user32.dll")]
+    private static extern nint GetParent(nint hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetWindow(nint hWnd, uint command);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern nint FindWindowEx(nint parent, nint childAfter, string? className, string? windowName);
 
     [StructLayout(LayoutKind.Sequential)]
     private readonly struct ScreenRect(int x, int y, int width, int height)

@@ -1,0 +1,33 @@
+# Push a tag like v1.1.0 → builds FloatingLyrics-win-x64.zip and publishes a GitHub release.
+# Installed widgets check the latest release and update themselves.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build package
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          ./FloatingLyrics/build-release.ps1 -Version $version
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: FloatingLyrics/artifacts/FloatingLyrics-win-x64.zip
+          generate_release_notes: true

@@ -28,6 +28,7 @@ public sealed class WindowModeService : IWindowModeService
 
     private readonly nint hwnd;
     private bool isAlwaysOnTop = true;
+    private nint attachedHost;
 
     public WindowModeService(Window window)
     {
@@ -182,6 +183,13 @@ public sealed class WindowModeService : IWindowModeService
             return false;
         }
 
+        if (CurrentMode == WindowPresentationMode.Wallpaper && attachedHost != 0 && IsWindow(attachedHost))
+        {
+            // Desktop widget always covers the whole desktop host surface.
+            ApplyHostBoundsAndZOrder(attachedHost);
+            return true;
+        }
+
         return SetWindowPos(
             hwnd,
             0,
@@ -303,6 +311,26 @@ public sealed class WindowModeService : IWindowModeService
             0,
             SwpNomove | SwpNosize | SwpNoactivate | SwpShowwindow);
 
+        // Preferred host: the window that owns the desktop icon view (SHELLDLL_DefView).
+        // On Windows 11 24H2+ this is Progman itself, on older shells a WorkerW. Hosting the
+        // widget there, above the icon list, keeps it on the desktop layer (below every app
+        // window) while still letting it receive mouse input for hover and the glass menu.
+        // Ask Explorer to split the wallpaper into its own WorkerW behind the icon view (the
+        // same message wallpaper engines use). Afterwards the icon layer is transparent, so the
+        // widget stays visible while it sits below the icons in click-through mode.
+        SplitWallpaperLayer();
+        var shellViewHost = FindShellViewHost();
+        if (shellViewHost != 0 && TryAttachToDesktopHost(shellViewHost))
+        {
+            EnsureLayeredWindowStyle();
+            _ = SetLayeredWindowAttributes(hwnd, 0, 255, LwaAlpha);
+            ApplyHostBoundsAndZOrder(shellViewHost);
+            attachedHost = shellViewHost;
+            CurrentMode = WindowPresentationMode.Wallpaper;
+            DebugTrace.Write($"WindowModeService: wallpaper applied (shell-view host) {DescribeWindow(shellViewHost)}");
+            return true;
+        }
+
         if (!TryGetWindowRect(hwnd, out var rect))
         {
             var workArea = GetWorkArea();
@@ -349,11 +377,13 @@ public sealed class WindowModeService : IWindowModeService
                 SwpNoactivate | SwpShowwindow);
 
             CurrentMode = WindowPresentationMode.Wallpaper;
+            attachedHost = host;
             DebugTrace.Write(
                 $"WindowModeService: wallpaper applied (desktop-host) host=0x{host.ToInt64():X}; size={width}x{height}");
             return true;
         }
 
+        attachedHost = 0;
         DebugTrace.Write("WindowModeService: desktop-host attach unavailable, applying safe-bottom fallback");
         _ = SetParent(hwnd, 0);
         var wallpaperStyle = GetWindowLongPtr(hwnd, GwlStyle);
@@ -375,6 +405,107 @@ public sealed class WindowModeService : IWindowModeService
         DebugTrace.Write(
             $"WindowModeService: wallpaper applied (safe-bottom fallback); pos={rect.Left},{rect.Top}; size={width}x{height}");
         return true;
+    }
+
+    public bool EnsureWallpaperAttachment()
+    {
+        if (hwnd == 0 || CurrentMode != WindowPresentationMode.Wallpaper)
+        {
+            return false;
+        }
+
+        var expectedHost = FindShellViewHost();
+        var currentParent = GetParent(hwnd);
+        var hostAlive = attachedHost != 0 && IsWindow(attachedHost);
+        if (expectedHost != 0 && (!hostAlive || currentParent != expectedHost))
+        {
+            DebugTrace.Write("WindowModeService: desktop host changed (Explorer restart?) - re-attaching");
+            return TrySetWallpaperMode();
+        }
+
+        if (attachedHost == 0 || currentParent != attachedHost)
+        {
+            return false;
+        }
+
+        // Z-order relative to the icon view is managed by the page (hover ⇄ click-through).
+        var changed = false;
+
+        if (TryGetClientSize(attachedHost, out var hostWidth, out var hostHeight) &&
+            TryGetWindowRect(hwnd, out var ownRect) &&
+            (ownRect.Right - ownRect.Left != hostWidth || ownRect.Bottom - ownRect.Top != hostHeight))
+        {
+            ApplyHostBoundsAndZOrder(attachedHost);
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private void ApplyHostBoundsAndZOrder(nint host)
+    {
+        if (!TryGetClientSize(host, out var width, out var height))
+        {
+            if (!TryGetWindowRect(host, out var hostRect))
+            {
+                return;
+            }
+
+            width = Math.Max(1, hostRect.Right - hostRect.Left);
+            height = Math.Max(1, hostRect.Bottom - hostRect.Top);
+        }
+
+        _ = SetWindowPos(hwnd, HwndTop, 0, 0, width, height, SwpNoactivate | SwpShowwindow);
+    }
+
+    private static bool TryGetClientSize(nint window, out int width, out int height)
+    {
+        width = 0;
+        height = 0;
+        if (window == 0 || !GetClientRect(window, out var client))
+        {
+            return false;
+        }
+
+        width = Math.Max(1, client.Right - client.Left);
+        height = Math.Max(1, client.Bottom - client.Top);
+        return width > 1 && height > 1;
+    }
+
+    private static void SplitWallpaperLayer()
+    {
+        var progman = FindWindow("Progman", null);
+        if (progman == 0)
+        {
+            return;
+        }
+
+        _ = SendMessageTimeout(progman, ProgmanMessage, 0, 0, SmtoNormal, 1000, out _);
+        _ = SendMessageTimeout(progman, ProgmanMessage, 0xD, 0, SmtoNormal, 1000, out _);
+        _ = SendMessageTimeout(progman, ProgmanMessage, 0xD, 1, SmtoNormal, 1000, out _);
+    }
+
+    /// <summary>Returns the window that directly hosts the desktop icon view (SHELLDLL_DefView).</summary>
+    private static nint FindShellViewHost()
+    {
+        var progman = FindWindow("Progman", null);
+        if (progman != 0 && FindWindowEx(progman, 0, "SHELLDLL_DefView", null) != 0)
+        {
+            return progman;
+        }
+
+        nint found = 0;
+        _ = EnumWindows((topWindow, _) =>
+        {
+            if (FindWindowEx(topWindow, 0, "SHELLDLL_DefView", null) == 0)
+            {
+                return true;
+            }
+
+            found = topWindow;
+            return false;
+        }, 0);
+        return found;
     }
 
     private bool TryAttachToDesktopHost(nint desktopHostWindow)
@@ -730,6 +861,10 @@ public sealed class WindowModeService : IWindowModeService
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool GetWindowRect(nint hWnd, out NativeRect rect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetClientRect(nint hWnd, out NativeRect rect);
+
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern int GetClassName(nint hWnd, char[] className, int maxCount);
