@@ -77,6 +77,35 @@ public sealed partial class MainPage
         }
     }
 
+    /// <summary>Shows who provided the current lyrics in the hover toolbar (API attribution).</summary>
+    private void UpdateLyricsAttribution()
+    {
+        var text = ViewModel.LyricsAttribution;
+        ToolbarAttributionText.Text = text;
+        ToolbarAttributionButton.Visibility = string.IsNullOrWhiteSpace(text) ? Visibility.Collapsed : Visibility.Visible;
+        ToolTipService.SetToolTip(ToolbarAttributionButton, string.IsNullOrWhiteSpace(ViewModel.LyricsAttributionUrl)
+            ? text
+            : $"{text}\n{ViewModel.LyricsAttributionUrl}");
+    }
+
+    private void ToolbarAttributionButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var url = ViewModel.LyricsAttributionUrl;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            DebugTrace.Write($"Attribution: cannot open link {ex.Message}");
+        }
+    }
+
     private void FontList_OnItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is FontChoice choice)

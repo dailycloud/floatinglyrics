@@ -163,7 +163,34 @@ public sealed class SpicyLyricsProvider(HttpClient httpClient, Func<string?> api
         var label = type.Equals("Syllable", StringComparison.OrdinalIgnoreCase)
             ? "Spicy Lyrics · по словам"
             : "Spicy Lyrics";
-        return new LyricsResult(lines, label, synced);
+
+        // Attribution (required by the API terms): always the provider; for community syncs
+        // (source "spicy_lyrics") also the people who made it, linked to their profiles.
+        var credits = new List<(string Name, string? Url)>();
+        if (string.Equals(GetString(body, "source"), "spicy_lyrics", StringComparison.OrdinalIgnoreCase) &&
+            body.TryGetProperty("UploadAttribution", out var attribution) &&
+            attribution.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var person in attribution.EnumerateObject())
+            {
+                if (person.Value.ValueKind == JsonValueKind.Object &&
+                    GetString(person.Value, "username") is { Length: > 0 } name &&
+                    !credits.Any(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    credits.Add((name, GetString(person.Value, "url")));
+                }
+            }
+        }
+
+        var attributionText = credits.Count > 0
+            ? $"Spicy Lyrics · {string.Join(", ", credits.Select(c => c.Name))}"
+            : "Spicy Lyrics";
+        return new LyricsResult(
+            lines,
+            label,
+            synced,
+            Attribution: attributionText,
+            AttributionUrl: credits.Select(c => c.Url).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)) ?? "https://spicylyrics.org");
     }
 
     /// <summary>Builds the line text from syllables and records each syllable's character range.</summary>

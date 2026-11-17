@@ -1168,6 +1168,25 @@
                         Padding="6"
                         Spacing="4">
                         <Button
+                            x:Name="ToolbarAttributionButton"
+                            Visibility="Collapsed"
+                            Padding="10,0"
+                            MinHeight="0"
+                            VerticalAlignment="Stretch"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            CornerRadius="14"
+                            Click="ToolbarAttributionButton_OnClick"
+                            AutomationProperties.Name="Источник текста">
+                            <TextBlock
+                                x:Name="ToolbarAttributionText"
+                                FontSize="12"
+                                Foreground="#E6FFFFFF"
+                                MaxWidth="260"
+                                TextTrimming="CharacterEllipsis"
+                                VerticalAlignment="Center" />
+                        </Button>
+                        <Button
                             x:Name="ToolbarRefreshButton"
                             Style="{StaticResource GlassIconButtonStyle}"
                             Click="SettingsRefreshButton_OnClick"

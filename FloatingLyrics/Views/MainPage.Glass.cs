@@ -742,6 +742,9 @@ public sealed partial class MainPage
             case nameof(MainViewModel.ArtworkAccentColor):
                 UpdateArtworkSwatch();
                 break;
+            case nameof(MainViewModel.LyricsAttribution):
+                UpdateLyricsAttribution();
+                break;
         }
 
         SyncChoiceGroups();
@@ -752,6 +755,7 @@ public sealed partial class MainPage
     }
 
     private static bool IsGlassSettingProperty(string? name) => name is
+        nameof(MainViewModel.LyricsAttribution) or
         nameof(MainViewModel.GlassVisibility) or
         nameof(MainViewModel.GlassBlur) or
         nameof(MainViewModel.GlassRefraction) or

@@ -196,6 +196,18 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     [ObservableProperty]
     private string sourceText = string.Empty;
 
+    /// <summary>Who provided (and synced) the lyrics shown now, for the on-widget credit.</summary>
+    [ObservableProperty]
+    private string lyricsAttribution = string.Empty;
+
+    public string? LyricsAttributionUrl { get; private set; }
+
+    private static string ShortSourceName(string source)
+    {
+        var dot = source.IndexOf(" · ", StringComparison.Ordinal);
+        return dot > 0 ? source[..dot] : source;
+    }
+
     [ObservableProperty]
     private BitmapImage coverArtImage = CreateCoverArtImage(null);
 
@@ -1302,6 +1314,8 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             }
 
             var result = await lyricsProvider.GetLyricsAsync(snapshot.Track, disposeTokenSource.Token);
+            LyricsAttribution = string.Empty;
+            LyricsAttributionUrl = null;
             if (result is null)
             {
                 SourceText = L("Source: unavailable", "Источник: недоступен");
@@ -1314,6 +1328,8 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             SourceText = UseRussianUi
                 ? $"Источник: {result.Source}"
                 : $"Source: {result.Source}";
+            LyricsAttribution = result.Attribution ?? ShortSourceName(result.Source);
+            LyricsAttributionUrl = result.AttributionUrl;
             if (!HasMeaningfulLyrics(result.Lines))
             {
                 HasLyricsContent = false;

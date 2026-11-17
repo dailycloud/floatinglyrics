@@ -45,12 +45,23 @@ public sealed class AppServices : IDisposable
             settingsOnlyMode);
     }
 
+    /// <summary>
+    /// Public client key of this app (a "client access" key: meant to ship inside the app,
+    /// rate-limited per user and revocable). A personal key from the environment or
+    /// settings.json takes precedence.
+    /// </summary>
+    private const string SpicyLyricsClientKey = "sl_pk_PmCceFpBMN-RkuhwJ69s6mqNNecpr6kVKtExWlXxpe0";
+
     private string? ResolveSpicyLyricsKey()
     {
         var fromEnvironment = Environment.GetEnvironmentVariable("FLOATING_LYRICS_SPICY_KEY");
-        return !string.IsNullOrWhiteSpace(fromEnvironment)
-            ? fromEnvironment
-            : settingsStore.Load().SpicyLyricsApiKey;
+        if (!string.IsNullOrWhiteSpace(fromEnvironment))
+        {
+            return fromEnvironment;
+        }
+
+        var fromSettings = settingsStore.Load().SpicyLyricsApiKey;
+        return !string.IsNullOrWhiteSpace(fromSettings) ? fromSettings : SpicyLyricsClientKey;
     }
 
     public void Dispose()
