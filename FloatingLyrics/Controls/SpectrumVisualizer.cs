@@ -25,6 +25,7 @@ public sealed partial class SpectrumVisualizer : Grid
     private Color low = Color.FromArgb(255, 255, 84, 84);
     private Color mid = Color.FromArgb(255, 121, 183, 244);
     private Color high = Color.FromArgb(255, 74, 255, 142);
+    private bool isReleased;
 
     public SpectrumVisualizer()
     {
@@ -36,7 +37,30 @@ public sealed partial class SpectrumVisualizer : Grid
             IsHitTestVisible = false
         };
         canvas.Draw += OnDraw;
+        Unloaded += OnUnloaded;
         Children.Add(canvas);
+    }
+
+    public void Release()
+    {
+        if (isReleased)
+        {
+            return;
+        }
+
+        isReleased = true;
+        Unloaded -= OnUnloaded;
+        canvas.Draw -= OnDraw;
+        Children.Remove(canvas);
+        canvas.RemoveFromVisualTree();
+        levels = [];
+        peaks = [];
+        ratios = [];
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        Release();
     }
 
     /// <summary>True on light wallpapers: adds a dark shadow and rim so light colours stay visible.</summary>
@@ -47,6 +71,11 @@ public sealed partial class SpectrumVisualizer : Grid
 
     public void SetFrame(float[] binLevels, float[] binPeaks, float[] binRatios, Color lowAccent, Color midAccent, Color highAccent, bool mirror)
     {
+        if (isReleased)
+        {
+            return;
+        }
+
         levels = binLevels;
         peaks = binPeaks;
         ratios = binRatios;
@@ -59,6 +88,11 @@ public sealed partial class SpectrumVisualizer : Grid
 
     private void OnDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
+        if (isReleased)
+        {
+            return;
+        }
+
         try
         {
             Draw(sender, args.DrawingSession);

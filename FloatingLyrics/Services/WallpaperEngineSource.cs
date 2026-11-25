@@ -245,6 +245,7 @@ internal static class WallpaperEngineSource
                 }
 
                 File.Move(temp, target, overwrite: true);
+                PruneFrameCacheBestEffort(Path.GetDirectoryName(target)!);
                 DebugTrace.Write($"WallpaperEngine: video frame extracted {width}x{height} from '{Path.GetFileName(video)}'");
                 FrameReady?.Invoke();
             }
@@ -257,6 +258,52 @@ internal static class WallpaperEngineSource
                 PendingFrames.TryRemove(target, out _);
             }
         });
+    }
+
+    private static void PruneFrameCacheBestEffort(string cacheDirectory)
+    {
+        const int maxFiles = 48;
+        const long maxBytes = 64L * 1024 * 1024;
+        try
+        {
+            var directory = new DirectoryInfo(cacheDirectory);
+            if (!directory.Exists)
+            {
+                return;
+            }
+
+            var files = directory
+                .EnumerateFiles("we-frame-*.jpg", SearchOption.TopDirectoryOnly)
+                .OrderByDescending(static file => file.LastWriteTimeUtc)
+                .ToList();
+
+            long totalBytes = 0;
+            foreach (var file in files)
+            {
+                totalBytes += file.Length;
+            }
+
+            for (var i = files.Count - 1; i >= 0; i--)
+            {
+                if (i < maxFiles && totalBytes <= maxBytes)
+                {
+                    continue;
+                }
+
+                var file = files[i];
+                try
+                {
+                    totalBytes -= file.Length;
+                    file.Delete();
+                }
+                catch
+                {
+                }
+            }
+        }
+        catch
+        {
+        }
     }
 
     private static string? FindInstallDir()

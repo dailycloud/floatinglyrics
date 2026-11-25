@@ -76,6 +76,7 @@ public sealed partial class MainPage : Page
 
     private bool isDraggingWindow;
     private bool isWindowClickThroughEnabled;
+    private bool isPageUnloaded;
     private uint draggingPointerId;
     private Point dragStartOverlayOffset;
     private Point dragStartPointerPositionInRoot;
@@ -91,6 +92,10 @@ public sealed partial class MainPage : Page
     private Storyboard? overlayGeometryStoryboard;
     private Storyboard? preRollInnerStoryboard;
     private Storyboard? coverPresentationStoryboard;
+    private double pendingGeometryContentWidth;
+    private double pendingGeometryDragWidth;
+    private double pendingGeometryVisualizerWidth;
+    private TextBlock? timelineMeasureProbe;
     private bool? overlayContentVisibleState;
     private DateTimeOffset lastOverlayPositiveSignalAtUtc = DateTimeOffset.MinValue;
     private string lastOverlayPresenceSignalReason = "init";
@@ -241,6 +246,7 @@ public sealed partial class MainPage : Page
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        isPageUnloaded = false;
         DebugTrace.Write("MainPage: loaded start");
         RunLoadedStep("bind-viewmodel", () => ViewModel.PropertyChanged += OnViewModelPropertyChanged);
         RunLoadedStep("resolve-window", () =>
@@ -419,12 +425,14 @@ public sealed partial class MainPage : Page
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        isPageUnloaded = true;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         startupWindowStateApplied = false;
         TeardownGlass();
         StopLyricsLoop();
         StopWordTicker();
         TeardownLyricsTextOverlay();
+        ReleaseTitleHalos();
         ViewModel.SetOverlayResizeDeferred(false);
         StopActiveLineTransition();
         isLineTransitionRunning = false;
@@ -436,14 +444,27 @@ public sealed partial class MainPage : Page
         StopCoverPresentationAnimation();
         StopWaitingDotsAnimation();
         StopActivePhysicalTrackTransition();
-        StopLyricsLoop();
         StopPhysicalTrackFadeTimer();
-        physicalLyricItems.Clear();
+        DisposePhysicalLyricItems();
         LyricsTrackSurface.Children.Clear();
+        LyricsCanvas.Clip = null;
+        DragSnapGridCanvas.Children.Clear();
         activePhysicalTrackPlan = new PhysicalTrackPlan(Array.Empty<PhysicalTrackEntry>(), 0, 0, false);
         physicalTrackVisualizerCanvas = null;
         physicalOutroVisualizerCanvas = null;
         activeVisualizerCanvas = null;
+        spectrumView?.Release();
+        spectrumView = null;
+        if (timelineMeasureProbe is not null)
+        {
+            timelineMeasureProbe.Text = string.Empty;
+            timelineMeasureProbe = null;
+        }
+
+        physicalItemTops = [];
+        visualizerLevels = [];
+        visualizerPeakLevels = [];
+        visualizerRatios = [];
         LyricsCanvas.SizeChanged -= LyricsCanvas_OnSizeChanged;
         RootGrid.SizeChanged -= RootGrid_OnSizeChanged;
         StopDebugOverlayTimer();
@@ -467,12 +488,28 @@ public sealed partial class MainPage : Page
         audioSpectrumAnalyzer.Dispose();
     }
 
+    private void EnqueueIfLoaded(Action action)
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!isPageUnloaded)
+            {
+                action();
+            }
+        });
+    }
+
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (isPageUnloaded)
+        {
+            return;
+        }
+
         if (IsGlassSettingProperty(e.PropertyName))
         {
             var glassProperty = e.PropertyName;
-            _ = DispatcherQueue.TryEnqueue(() => OnGlassSettingChanged(glassProperty));
+            EnqueueIfLoaded(() => OnGlassSettingChanged(glassProperty));
             if (e.PropertyName is not (nameof(MainViewModel.LyricsTextAlignment) or nameof(MainViewModel.AutoLyricsTextAlignment)))
             {
                 return;
@@ -481,13 +518,13 @@ public sealed partial class MainPage : Page
 
         if (e.PropertyName == nameof(MainViewModel.IsOutroActive))
         {
-            _ = DispatcherQueue.TryEnqueue(UpdateVisualizerState);
+            EnqueueIfLoaded(UpdateVisualizerState);
             return;
         }
 
         if (e.PropertyName == nameof(MainViewModel.LineAnimationVersion))
         {
-            _ = DispatcherQueue.TryEnqueue(QueueLineTransition);
+            EnqueueIfLoaded(QueueLineTransition);
             return;
         }
 
@@ -502,7 +539,7 @@ public sealed partial class MainPage : Page
             nameof(MainViewModel.IsWaitingDotsActive) or
             nameof(MainViewModel.IsCountdownActive))
         {
-            _ = DispatcherQueue.TryEnqueue(() =>
+            EnqueueIfLoaded(() =>
             {
                 ProcessOverlayPresenceSignal(animated: true, e.PropertyName ?? "<null>");
                 UpdateLyricsHorizontalAlignment();
@@ -513,7 +550,7 @@ public sealed partial class MainPage : Page
         if (e.PropertyName is nameof(MainViewModel.TrackTitle) or
             nameof(MainViewModel.ArtistName))
         {
-            _ = DispatcherQueue.TryEnqueue(() =>
+            EnqueueIfLoaded(() =>
             {
                 ProcessOverlayPresenceSignal(animated: true, e.PropertyName ?? "<null>");
                 InvalidateOverlayGeometryCache();
@@ -524,7 +561,7 @@ public sealed partial class MainPage : Page
 
         if (e.PropertyName == nameof(MainViewModel.NextLineTopMargin))
         {
-            _ = DispatcherQueue.TryEnqueue(() =>
+            EnqueueIfLoaded(() =>
             {
                 if (ShouldUsePhysicalTrack())
                 {
@@ -543,7 +580,7 @@ public sealed partial class MainPage : Page
         if (e.PropertyName is nameof(MainViewModel.CurrentLineFontSize) or
             nameof(MainViewModel.NextLineFontSize))
         {
-            _ = DispatcherQueue.TryEnqueue(() =>
+            EnqueueIfLoaded(() =>
             {
                 InvalidateOverlayGeometryCache();
                 if (ShouldUsePhysicalTrack())
@@ -572,7 +609,7 @@ public sealed partial class MainPage : Page
             nameof(MainViewModel.UseCenterTopCoverLayout) or
             nameof(MainViewModel.CenterAlignmentCoverSize))
         {
-            _ = DispatcherQueue.TryEnqueue(() =>
+            EnqueueIfLoaded(() =>
             {
                 InvalidateOverlayGeometryCache();
                 UpdateLyricsHorizontalAlignment(forceGeometryRecompute: true);
@@ -585,14 +622,13 @@ public sealed partial class MainPage : Page
             nameof(MainViewModel.NextLineBrush) or
             nameof(MainViewModel.TextShadowBrush))
         {
-            _ = DispatcherQueue.TryEnqueue(() =>
+            EnqueueIfLoaded(() =>
             {
                 ApplyLineBrushPalette();
                 if (ShouldUsePhysicalTrack())
                 {
                     if (isLyricsLoopActive)
                     {
-                        // Never snap a running transition: just recolour from the springs.
                         foreach (var item in physicalLyricItems)
                         {
                             ApplyPhysicalItemVisual(item);
@@ -613,14 +649,14 @@ public sealed partial class MainPage : Page
             nameof(MainViewModel.PreRollVisibility) or
             nameof(MainViewModel.LyricsVisibility))
         {
-            _ = DispatcherQueue.TryEnqueue(() => ProcessOverlayPresenceSignal(animated: true, e.PropertyName ?? "<null>"));
+            EnqueueIfLoaded(() => ProcessOverlayPresenceSignal(animated: true, e.PropertyName ?? "<null>"));
             return;
         }
 
         if (e.PropertyName is nameof(MainViewModel.TimelineLines) or
             nameof(MainViewModel.HasSyncedTimeline))
         {
-            _ = DispatcherQueue.TryEnqueue(() =>
+            EnqueueIfLoaded(() =>
             {
                 InvalidateOverlayGeometryCache();
                 if (ShouldUsePhysicalTrack())
@@ -643,7 +679,7 @@ public sealed partial class MainPage : Page
             nameof(MainViewModel.WaitingDotsVisibility) or
             nameof(MainViewModel.CountdownVisibility))
         {
-            _ = DispatcherQueue.TryEnqueue(() =>
+            EnqueueIfLoaded(() =>
             {
                 if (physicalTrackModeActive)
                 {
@@ -660,14 +696,14 @@ public sealed partial class MainPage : Page
         if (e.PropertyName is nameof(MainViewModel.ShowDebugHitboxes) or
             nameof(MainViewModel.ShowRuntimeDebugPanel))
         {
-            _ = DispatcherQueue.TryEnqueue(UpdateDebugOverlayState);
+            EnqueueIfLoaded(UpdateDebugOverlayState);
             return;
         }
 
         if (e.PropertyName is nameof(MainViewModel.OscilloscopeDetail) or
             nameof(MainViewModel.OscilloscopeMirrorBars))
         {
-            _ = DispatcherQueue.TryEnqueue(() =>
+            EnqueueIfLoaded(() =>
             {
                 EnsureVisualizerBuffers();
                 visualizerLinesDirty = true;
@@ -678,14 +714,14 @@ public sealed partial class MainPage : Page
 
         if (e.PropertyName is nameof(MainViewModel.AudioSourceAppId) or nameof(MainViewModel.AppScopedAudioCapture))
         {
-            _ = DispatcherQueue.TryEnqueue(UpdateVisualizerCaptureSource);
+            EnqueueIfLoaded(UpdateVisualizerCaptureSource);
             return;
         }
 
         if (e.PropertyName is nameof(MainViewModel.ViewportFadeZone) or
             nameof(MainViewModel.ViewportFadeSoftness))
         {
-            _ = DispatcherQueue.TryEnqueue(UpdatePhysicalTrackViewportFade);
+            EnqueueIfLoaded(UpdatePhysicalTrackViewportFade);
             return;
         }
 
@@ -694,14 +730,14 @@ public sealed partial class MainPage : Page
             nameof(MainViewModel.SelectedPositionPreset) or
             nameof(MainViewModel.SelectedCustomPositionPreset))
         {
-            _ = DispatcherQueue.TryEnqueue(() => UpdateLyricsHorizontalAlignment(forceGeometryRecompute: true));
+            EnqueueIfLoaded(() => UpdateLyricsHorizontalAlignment(forceGeometryRecompute: true));
             return;
         }
 
         if (e.PropertyName is nameof(MainViewModel.OverlayContentOffsetX) or
             nameof(MainViewModel.OverlayContentOffsetY))
         {
-            _ = DispatcherQueue.TryEnqueue(ApplyOverlayRootOffsetFromViewModel);
+            EnqueueIfLoaded(ApplyOverlayRootOffsetFromViewModel);
             return;
         }
 
@@ -709,7 +745,7 @@ public sealed partial class MainPage : Page
             nameof(MainViewModel.CoverSize) or
             nameof(MainViewModel.CoverColumnSpacing))
         {
-            _ = DispatcherQueue.TryEnqueue(() =>
+            EnqueueIfLoaded(() =>
             {
                 InvalidateOverlayGeometryCache();
                 AnimateCoverPresentation();
@@ -724,7 +760,7 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        _ = DispatcherQueue.TryEnqueue(UpdateWindowClickThroughMode);
+        EnqueueIfLoaded(UpdateWindowClickThroughMode);
     }
 
     private void RootGrid_OnSizeChanged(object sender, SizeChangedEventArgs e)
@@ -1269,13 +1305,18 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        pendingGeometryContentWidth = contentWidth;
+        pendingGeometryDragWidth = dragWidth;
+        pendingGeometryVisualizerWidth = visualizerWidth;
         overlayGeometryStoryboard = storyboard;
-        storyboard.Completed += (_, _) =>
-        {
-            overlayGeometryStoryboard = null;
-            ApplyOverlayGeometry(contentWidth, dragWidth, visualizerWidth);
-        };
+        storyboard.Completed += OnOverlayGeometryCompleted;
         storyboard.Begin();
+    }
+
+    private void OnOverlayGeometryCompleted(object? sender, object e)
+    {
+        StopOverlayGeometryAnimation();
+        ApplyOverlayGeometry(pendingGeometryContentWidth, pendingGeometryDragWidth, pendingGeometryVisualizerWidth);
     }
 
     private void StopOverlayGeometryAnimation()
@@ -1285,6 +1326,7 @@ public sealed partial class MainPage : Page
             return;
         }
 
+        overlayGeometryStoryboard.Completed -= OnOverlayGeometryCompleted;
         overlayGeometryStoryboard.Stop();
         overlayGeometryStoryboard = null;
     }
@@ -1384,14 +1426,14 @@ public sealed partial class MainPage : Page
             return 0;
         }
 
-        var probe = new TextBlock
+        timelineMeasureProbe ??= new TextBlock
         {
-            FontFamily = currentLineFontFamily,
-            FontWeight = lyricsFontWeight,
-            FontSize = ViewModel.CurrentLineFontSize,
             TextWrapping = TextWrapping.NoWrap,
             TextTrimming = TextTrimming.None
         };
+        timelineMeasureProbe.FontFamily = currentLineFontFamily;
+        timelineMeasureProbe.FontWeight = lyricsFontWeight;
+        timelineMeasureProbe.FontSize = ViewModel.CurrentLineFontSize;
 
         var longest = 0d;
         foreach (var line in ViewModel.TimelineLines)
@@ -1401,15 +1443,16 @@ public sealed partial class MainPage : Page
                 continue;
             }
 
-            probe.Text = line.Text;
-            probe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            var measured = Math.Max(probe.DesiredSize.Width, probe.ActualWidth);
+            timelineMeasureProbe.Text = line.Text;
+            timelineMeasureProbe.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            var measured = Math.Max(timelineMeasureProbe.DesiredSize.Width, timelineMeasureProbe.ActualWidth);
             if (double.IsFinite(measured) && measured > longest)
             {
                 longest = measured;
             }
         }
 
+        timelineMeasureProbe.Text = string.Empty;
         return longest;
     }
 
@@ -1616,8 +1659,7 @@ public sealed partial class MainPage : Page
 
         // The whole widget surface is a drag area; the drag only starts after a small movement
         // so a simple click does not flash the snap grid.
-        anchorStoryboard?.Stop();
-        isAnchorAnimating = false;
+        StopAnchorStoryboard();
         dragStartPointerPositionInRoot = e.GetCurrentPoint(RootGrid).Position;
         dragPressPointInRoot = dragStartPointerPositionInRoot;
         dragStartOverlayOffset = new Point(OverlayRootHostTranslate.X, OverlayRootHostTranslate.Y);
@@ -1805,6 +1847,7 @@ public sealed partial class MainPage : Page
     private void HideDragSnapOverlay()
     {
         DragSnapOverlay.Visibility = Visibility.Collapsed;
+        DragSnapGridCanvas.Children.Clear();
     }
 
     private void RebuildDragSnapGridOverlay()
@@ -2833,13 +2876,29 @@ public sealed partial class MainPage : Page
         activePhysicalTrackPlan = new PhysicalTrackPlan(Array.Empty<PhysicalTrackEntry>(), 0, 0, false);
         physicalTrackInitialized = false;
         physicalRenderedIndex = -1;
+        DisposePhysicalLyricItems();
         LyricsTrackSurface.Children.Clear();
-        physicalLyricItems.Clear();
+        spectrumView?.Release();
+        spectrumView = null;
         physicalTrackVisualizerCanvas = null;
         physicalOutroVisualizerCanvas = null;
         activeVisualizerCanvas = null;
         visualizerLinesDirty = true;
         ApplyRestingLineLayerVisuals();
+    }
+
+    private void DisposePhysicalLyricItems()
+    {
+        foreach (var oldItem in physicalLyricItems)
+        {
+            oldItem.TextLayout?.Dispose();
+            oldItem.TextLayout = null;
+            oldItem.BackgroundLayout?.Dispose();
+            oldItem.BackgroundLayout = null;
+            oldItem.Line = null;
+        }
+
+        physicalLyricItems.Clear();
     }
 
     private void SetPhysicalTrackModeActive(bool active)
@@ -3105,13 +3164,9 @@ public sealed partial class MainPage : Page
         var previousPlan = activePhysicalTrackPlan;
         var previousRenderedIndex = physicalRenderedIndex;
         StopActivePhysicalTrackTransition();
-        foreach (var oldItem in physicalLyricItems)
-        {
-            oldItem.TextLayout?.Dispose();
-            oldItem.BackgroundLayout?.Dispose();
-        }
-
-        physicalLyricItems.Clear();
+        spectrumView?.Release();
+        spectrumView = null;
+        DisposePhysicalLyricItems();
         LyricsTrackSurface.Children.Clear();
         physicalTrackVisualizerCanvas = null;
         physicalOutroVisualizerCanvas = null;
@@ -4334,6 +4389,9 @@ public sealed partial class MainPage : Page
             var canvas = ResolveVisualizerCanvas();
             if (!ReferenceEquals(canvas, activeVisualizerCanvas))
             {
+                spectrumView?.Release();
+                spectrumView = null;
+                activeVisualizerCanvas?.Children.Clear();
                 activeVisualizerCanvas = canvas;
                 visualizerBarVisuals.Clear();
                 visualizerLinesDirty = true;
@@ -4376,6 +4434,8 @@ public sealed partial class MainPage : Page
             }
 
             visualizerLinesDirty = false;
+            spectrumView?.Release();
+            spectrumView = null;
             canvas.Children.Clear();
             Array.Fill(visualizerLevels, 0f);
             Array.Fill(visualizerPeakLevels, 0f);

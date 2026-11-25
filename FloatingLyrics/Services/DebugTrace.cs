@@ -18,7 +18,9 @@ public static class DebugTrace
     private static readonly Queue<string> _buffer = new();
     private const int MaxBuffer = 200;
 
+    private const long MaxLogFileBytes = 2L * 1024 * 1024;
     private static readonly object _lock = new();
+    private static readonly object _fileLock = new();
 
     public static void Write(string message)
     {
@@ -56,8 +58,17 @@ public static class DebugTrace
     {
         try
         {
-            Directory.CreateDirectory(LogRootPath);
-            File.AppendAllText(LogFilePath, line + Environment.NewLine);
+            lock (_fileLock)
+            {
+                Directory.CreateDirectory(LogRootPath);
+                if (File.Exists(LogFilePath) && new FileInfo(LogFilePath).Length >= MaxLogFileBytes)
+                {
+                    var backupPath = LogFilePath + ".old";
+                    File.Move(LogFilePath, backupPath, overwrite: true);
+                }
+
+                File.AppendAllText(LogFilePath, line + Environment.NewLine);
+            }
         }
         catch { }
     }

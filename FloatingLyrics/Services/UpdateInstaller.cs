@@ -71,7 +71,7 @@ public static class UpdateInstaller
         var scriptPath = Path.Combine(Path.GetTempPath(), "FloatingLyrics-update.cmd");
         await File.WriteAllTextAsync(scriptPath, script, new UTF8Encoding(false), cancellationToken);
 
-        Process.Start(new ProcessStartInfo
+        using var _ = Process.Start(new ProcessStartInfo
         {
             FileName = "cmd.exe",
             Arguments = $"/c \"{scriptPath}\"",

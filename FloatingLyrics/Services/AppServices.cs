@@ -6,13 +6,13 @@ public sealed class AppServices : IDisposable
     private readonly IOverlaySettingsStore settingsStore = new OverlaySettingsStore();
     private readonly IStartupRegistrationService startupRegistrationService = new StartupRegistrationService();
     private readonly IUpdateService updateService;
+    private readonly INowPlayingService nowPlayingService;
 
     public MainViewModel MainViewModel { get; }
 
     public AppServices(Window window, bool settingsOnlyMode = false)
     {
         updateService = new GitHubUpdateService(httpClient);
-        INowPlayingService nowPlayingService;
         ILyricsProvider lyricsProvider;
         IWindowModeService windowModeService;
 
@@ -67,6 +67,7 @@ public sealed class AppServices : IDisposable
     public void Dispose()
     {
         MainViewModel.Dispose();
+        (nowPlayingService as IDisposable)?.Dispose();
         httpClient.Dispose();
     }
 }

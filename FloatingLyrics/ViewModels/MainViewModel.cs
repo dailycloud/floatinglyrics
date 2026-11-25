@@ -209,7 +209,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     }
 
     [ObservableProperty]
-    private BitmapImage coverArtImage = CreateCoverArtImage(null);
+    private BitmapImage coverArtImage = null!;
 
     [ObservableProperty]
     private int lineAnimationVersion;
@@ -508,13 +508,36 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
     public bool HasSyncedTimeline => isSyncedTimeline;
 
-    public SolidColorBrush TrackTitleBrush => new(GetPalette().PrimaryText);
-    public SolidColorBrush ArtistBrush => new(GetPalette().SecondaryText);
-    public SolidColorBrush CurrentLineBrush => new(UseDarkText ? Color.FromArgb(255, 14, 16, 22) : Color.FromArgb(255, 255, 255, 255));
-    public SolidColorBrush PreviousLineBrush => new(GetPalette().SecondaryText);
-    public SolidColorBrush NextLineBrush => new(GetPalette().MutedText);
-    public SolidColorBrush TimingBrush => new(GetPalette().TimingText);
-    public SolidColorBrush TextShadowBrush => new(GetShadowColor());
+    private SolidColorBrush? trackTitleBrushCache;
+    private SolidColorBrush? artistBrushCache;
+    private SolidColorBrush? currentLineBrushCache;
+    private SolidColorBrush? previousLineBrushCache;
+    private SolidColorBrush? nextLineBrushCache;
+    private SolidColorBrush? timingBrushCache;
+    private SolidColorBrush? textShadowBrushCache;
+    private bool isDisposed;
+
+    private static SolidColorBrush GetOrUpdateBrush(ref SolidColorBrush? cache, Color color)
+    {
+        if (cache is null)
+        {
+            cache = new SolidColorBrush(color);
+        }
+        else if (cache.Color != color)
+        {
+            cache.Color = color;
+        }
+
+        return cache;
+    }
+
+    public SolidColorBrush TrackTitleBrush => GetOrUpdateBrush(ref trackTitleBrushCache, GetPalette().PrimaryText);
+    public SolidColorBrush ArtistBrush => GetOrUpdateBrush(ref artistBrushCache, GetPalette().SecondaryText);
+    public SolidColorBrush CurrentLineBrush => GetOrUpdateBrush(ref currentLineBrushCache, UseDarkText ? Color.FromArgb(255, 14, 16, 22) : Color.FromArgb(255, 255, 255, 255));
+    public SolidColorBrush PreviousLineBrush => GetOrUpdateBrush(ref previousLineBrushCache, GetPalette().SecondaryText);
+    public SolidColorBrush NextLineBrush => GetOrUpdateBrush(ref nextLineBrushCache, GetPalette().MutedText);
+    public SolidColorBrush TimingBrush => GetOrUpdateBrush(ref timingBrushCache, GetPalette().TimingText);
+    public SolidColorBrush TextShadowBrush => GetOrUpdateBrush(ref textShadowBrushCache, GetShadowColor());
     public Color OscilloscopeLowAccentColor => artworkLowAccentColor;
     public Color OscilloscopeMidAccentColor => artworkMidAccentColor;
     public Color OscilloscopeHighAccentColor => artworkHighAccentColor;
@@ -1468,7 +1491,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         try
         {
             Directory.CreateDirectory(SettingsDirectoryPath);
-            Process.Start(new ProcessStartInfo
+            using var _ = Process.Start(new ProcessStartInfo
             {
                 FileName = "explorer.exe",
                 Arguments = $"\"{SettingsDirectoryPath}\"",
@@ -1488,7 +1511,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         try
         {
             Directory.CreateDirectory(DebugTrace.LogRootPath);
-            Process.Start(new ProcessStartInfo
+            using var _ = Process.Start(new ProcessStartInfo
             {
                 FileName = "explorer.exe",
                 Arguments = $"\"{DebugTrace.LogRootPath}\"",
@@ -1512,8 +1535,16 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         updateTimer = dispatcherQueue.CreateTimer();
         updateTimer.Interval = TimeSpan.FromHours(1);
         updateTimer.IsRepeating = true;
-        updateTimer.Tick += (_, _) => _ = RunStartupUpdateCheckAsync();
+        updateTimer.Tick += OnUpdateTimerTick;
         updateTimer.Start();
+    }
+
+    private void OnUpdateTimerTick(DispatcherQueueTimer sender, object args)
+    {
+        if (!isDisposed)
+        {
+            _ = RunStartupUpdateCheckAsync();
+        }
     }
 
     private bool CanCheckForUpdates() => !IsUpdateCheckInProgress;
@@ -1614,7 +1645,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
         try
         {
-            Process.Start(new ProcessStartInfo
+            using var _ = Process.Start(new ProcessStartInfo
             {
                 FileName = url,
                 UseShellExecute = true
@@ -1640,7 +1671,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
                 PersistSettings();
             }
 
-            Process.Start(new ProcessStartInfo
+            using var _ = Process.Start(new ProcessStartInfo
             {
                 FileName = "notepad.exe",
                 Arguments = $"\"{SettingsFilePath}\"",
@@ -1867,7 +1898,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
     private void OnLineTimerTick(DispatcherQueueTimer sender, object args)
     {
-        if (isSyncedTimeline || timeline.Count <= 1)
+        if (isDisposed || isSyncedTimeline || timeline.Count <= 1)
         {
             return;
         }
@@ -1878,12 +1909,15 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
     private void OnPlaybackTimerTick(DispatcherQueueTimer sender, object args)
     {
-        _ = SynchronizeTimelineAsync();
+        if (!isDisposed)
+        {
+            _ = SynchronizeTimelineAsync();
+        }
     }
 
     private async Task SynchronizeTimelineAsync()
     {
-        if (IsBusy || isPlaybackTickInFlight)
+        if (isDisposed || IsBusy || isPlaybackTickInFlight)
         {
             return;
         }
@@ -2649,6 +2683,12 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
     public void Dispose()
     {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        isDisposed = true;
         disposeTokenSource.Cancel();
 
         lineTimer.Stop();
@@ -2657,6 +2697,14 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         playbackTimer.Stop();
         playbackTimer.Tick -= OnPlaybackTimerTick;
 
+        if (updateTimer is not null)
+        {
+            updateTimer.Stop();
+            updateTimer.Tick -= OnUpdateTimerTick;
+            updateTimer = null;
+        }
+
+        timeline.Clear();
         CustomPositionPresets.CollectionChanged -= OnCustomPositionPresetsChanged;
         disposeTokenSource.Dispose();
     }

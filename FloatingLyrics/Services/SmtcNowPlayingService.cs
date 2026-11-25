@@ -1,11 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using Windows.Foundation;
 using Windows.Media.Control;
 
 namespace FloatingLyrics.Services;
 
-public sealed class SmtcNowPlayingService : INowPlayingService
+public sealed class SmtcNowPlayingService : INowPlayingService, IDisposable
 {
     private static readonly string ArtworkCacheFolder =
         Path.Combine(Path.GetTempPath(), "FloatingLyrics", "Artwork");
@@ -45,7 +46,14 @@ public sealed class SmtcNowPlayingService : INowPlayingService
     private DateTimeOffset lastMetadataAttemptAtUtc = DateTimeOffset.MinValue;
     private static int artworkCacheWriteCount;
     private readonly HashSet<GlobalSystemMediaTransportControlsSession> observedSessions = [];
+    private readonly List<GlobalSystemMediaTransportControlsSession> staleObservedSessions = [];
+    private GlobalSystemMediaTransportControlsSessionManager? subscribedManager;
+    private TypedEventHandler<GlobalSystemMediaTransportControlsSessionManager, SessionsChangedEventArgs>? sessionsChangedHandler;
+    private TypedEventHandler<GlobalSystemMediaTransportControlsSessionManager, CurrentSessionChangedEventArgs>? currentSessionChangedHandler;
+    private TypedEventHandler<GlobalSystemMediaTransportControlsSession, MediaPropertiesChangedEventArgs>? sessionMediaChangedHandler;
+    private TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs>? sessionPlaybackChangedHandler;
     private volatile bool metadataInvalidated;
+    private volatile bool isDisposed;
 
     private string? emittedTitle;
     private string? emittedArtist;
@@ -299,19 +307,24 @@ public sealed class SmtcNowPlayingService : INowPlayingService
     {
         if (managerTask is null)
         {
+            sessionsChangedHandler ??= (_, _) => InvalidateMetadata();
+            currentSessionChangedHandler ??= (_, _) => InvalidateMetadata();
             managerTask = GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask();
             _ = managerTask.ContinueWith(
                 t =>
                 {
-                    if (t.Status != TaskStatus.RanToCompletion)
+                    if (t.Status != TaskStatus.RanToCompletion || isDisposed)
                     {
                         return;
                     }
 
-                    // Event-driven invalidation: a track/session change is picked up on the
-                    // very next poll instead of waiting for the metadata refresh interval.
-                    t.Result.SessionsChanged += (_, _) => InvalidateMetadata();
-                    t.Result.CurrentSessionChanged += (_, _) => InvalidateMetadata();
+                    subscribedManager = t.Result;
+                    subscribedManager.SessionsChanged += sessionsChangedHandler;
+                    subscribedManager.CurrentSessionChanged += currentSessionChangedHandler;
+                    if (isDisposed)
+                    {
+                        UnsubscribeManager();
+                    }
                 },
                 TaskScheduler.Default);
         }
@@ -326,6 +339,34 @@ public sealed class SmtcNowPlayingService : INowPlayingService
 
     private void ObserveSessions(IReadOnlyList<GlobalSystemMediaTransportControlsSession> sessions)
     {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        sessionMediaChangedHandler ??= (_, _) => InvalidateMetadata();
+        sessionPlaybackChangedHandler ??= (_, _) => InvalidateMetadata();
+
+        if (observedSessions.Count > 0)
+        {
+            staleObservedSessions.Clear();
+            foreach (var observed in observedSessions)
+            {
+                if (!sessions.Contains(observed))
+                {
+                    staleObservedSessions.Add(observed);
+                }
+            }
+
+            foreach (var stale in staleObservedSessions)
+            {
+                _ = observedSessions.Remove(stale);
+                UnsubscribeSession(stale);
+            }
+
+            staleObservedSessions.Clear();
+        }
+
         foreach (var session in sessions)
         {
             if (!observedSessions.Add(session))
@@ -335,19 +376,88 @@ public sealed class SmtcNowPlayingService : INowPlayingService
 
             try
             {
-                session.MediaPropertiesChanged += (_, _) => InvalidateMetadata();
-                session.PlaybackInfoChanged += (_, _) => InvalidateMetadata();
+                session.MediaPropertiesChanged += sessionMediaChangedHandler;
+                session.PlaybackInfoChanged += sessionPlaybackChangedHandler;
             }
             catch
             {
-                // Some sessions refuse event subscription; polling still covers them.
+            }
+        }
+    }
+
+    private void UnsubscribeSession(GlobalSystemMediaTransportControlsSession session)
+    {
+        if (sessionMediaChangedHandler is not null)
+        {
+            try
+            {
+                session.MediaPropertiesChanged -= sessionMediaChangedHandler;
+            }
+            catch
+            {
             }
         }
 
-        if (observedSessions.Count > 32)
+        if (sessionPlaybackChangedHandler is not null)
         {
-            observedSessions.RemoveWhere(s => !sessions.Contains(s));
+            try
+            {
+                session.PlaybackInfoChanged -= sessionPlaybackChangedHandler;
+            }
+            catch
+            {
+            }
         }
+    }
+
+    private void UnsubscribeManager()
+    {
+        var manager = subscribedManager;
+        subscribedManager = null;
+        if (manager is null)
+        {
+            return;
+        }
+
+        if (sessionsChangedHandler is not null)
+        {
+            try
+            {
+                manager.SessionsChanged -= sessionsChangedHandler;
+            }
+            catch
+            {
+            }
+        }
+
+        if (currentSessionChangedHandler is not null)
+        {
+            try
+            {
+                manager.CurrentSessionChanged -= currentSessionChangedHandler;
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (isDisposed)
+        {
+            return;
+        }
+
+        isDisposed = true;
+        UnsubscribeManager();
+        foreach (var session in observedSessions)
+        {
+            UnsubscribeSession(session);
+        }
+
+        observedSessions.Clear();
+        staleObservedSessions.Clear();
     }
 
     private GlobalSystemMediaTransportControlsSession? ResolveSession(

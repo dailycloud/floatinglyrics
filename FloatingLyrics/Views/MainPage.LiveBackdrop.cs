@@ -23,6 +23,14 @@ public sealed partial class MainPage
     private RectInt32 liveRect;
     private string? liveKey;
 
+    private void ReleaseLiveBackdropCache()
+    {
+        lastLiveCaptureSignature = null;
+        livePixels = null;
+        liveValid = null;
+        liveKey = null;
+    }
+
     private void TryCaptureLiveBackdrop()
     {
         if (hwnd == 0 || isWidgetHovered || isPanelHovered || isSettingsPanelOpen)

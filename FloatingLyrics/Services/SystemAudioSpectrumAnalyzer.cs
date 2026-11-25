@@ -25,6 +25,9 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
     private readonly Complex[] fftWorking = new Complex[FftLength];
     private readonly float[] window = CreateHannWindow(FftLength);
     private readonly float[] latestMagnitudes = new float[FftLength / 2];
+    private readonly float[] spectrumSnapshot = new float[FftLength / 2];
+    private readonly object spectrumReadGate = new();
+    private readonly List<(AudioSessionControl Session, AudioMeterInformation Meter)> cachedTargetSessions = [];
 
     private WasapiLoopbackCapture? capture;
     private MMDeviceEnumerator? sessionEnumerator;
@@ -32,6 +35,7 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
     private int fftIndex;
     private int sampleRate = 48000;
     private bool hasSpectrum;
+    private bool isDisposed;
 
     private string preferredSourceAppId = string.Empty;
     private string normalizedSourceAppId = string.Empty;
@@ -58,20 +62,44 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
 
     public void Start()
     {
-        if (capture is not null)
+        if (isDisposed || capture is not null)
         {
             return;
         }
 
         var loopback = new WasapiLoopbackCapture();
-        sampleRate = loopback.WaveFormat.SampleRate;
-        loopback.DataAvailable += OnDataAvailable;
-        capture = loopback;
-        loopback.StartRecording();
-
-        lock (routeGate)
+        try
         {
-            RefreshPreferredRoutingLocked(force: true);
+            sampleRate = loopback.WaveFormat.SampleRate;
+            loopback.DataAvailable += OnDataAvailable;
+            capture = loopback;
+            loopback.StartRecording();
+
+            lock (routeGate)
+            {
+                RefreshPreferredRoutingLocked(force: true);
+            }
+        }
+        catch
+        {
+            capture = null;
+            loopback.DataAvailable -= OnDataAvailable;
+            try
+            {
+                loopback.StopRecording();
+            }
+            catch
+            {
+            }
+
+            loopback.Dispose();
+            lock (routeGate)
+            {
+                DisposeSessionEndpointLocked();
+                captureRouteDescription = "system-loopback";
+            }
+
+            throw;
         }
     }
 
@@ -142,11 +170,15 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
             executableHint = nextExecutableHint;
             sourceTokens = nextTokens;
             preferredProcessIds.Clear();
+            DisposeTargetSessionsLocked();
             lastRoutingRefreshUtc = DateTimeOffset.MinValue;
             lastPeakRefreshUtc = DateTimeOffset.MinValue;
             appScopedGate = 1f;
             appScopedGateInitialized = false;
-            RefreshPreferredRoutingLocked(force: true);
+            if (capture is not null)
+            {
+                RefreshPreferredRoutingLocked(force: true);
+            }
         }
     }
 
@@ -158,52 +190,53 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
         }
 
         var result = new float[pointCount];
-        var snapshot = new float[latestMagnitudes.Length];
-        int snapshotSampleRate;
-        bool hasData;
-        lock (gate)
+        lock (spectrumReadGate)
         {
-            Array.Copy(latestMagnitudes, snapshot, snapshot.Length);
-            snapshotSampleRate = sampleRate;
-            hasData = hasSpectrum;
-        }
-
-        if (!hasData)
-        {
-            return result;
-        }
-
-        var nyquist = Math.Max(1, snapshotSampleRate / 2.0);
-        var maxFreq = Math.Min(18000, nyquist - 1);
-        var minFreq = 24.0;
-        if (maxFreq <= minFreq)
-        {
-            maxFreq = nyquist;
-            minFreq = 1;
-        }
-
-        var focus = Math.Clamp(lowFrequencyFocus, 0, 1);
-        for (var i = 0; i < pointCount; i++)
-        {
-            var startRatio = i / (double)pointCount;
-            var endRatio = (i + 1) / (double)pointCount;
-            var startHz = LerpLog(minFreq, maxFreq, WarpForLowFrequencyDetail(startRatio, focus));
-            var endHz = LerpLog(minFreq, maxFreq, WarpForLowFrequencyDetail(endRatio, focus));
-            var startBin = FrequencyToBin(startHz, nyquist, snapshot.Length);
-            var endBin = FrequencyToBin(endHz, nyquist, snapshot.Length);
-            if (endBin < startBin)
+            int snapshotSampleRate;
+            bool hasData;
+            lock (gate)
             {
-                (startBin, endBin) = (endBin, startBin);
+                Array.Copy(latestMagnitudes, spectrumSnapshot, spectrumSnapshot.Length);
+                snapshotSampleRate = sampleRate;
+                hasData = hasSpectrum;
             }
 
-            var maxValue = 0f;
-            for (var bin = startBin; bin <= endBin; bin++)
+            if (!hasData)
             {
-                maxValue = MathF.Max(maxValue, snapshot[bin]);
+                return result;
             }
 
-            // Guard against NaN/∞ from degenerate capture buffers: one NaN poisons everything downstream.
-            result[i] = float.IsFinite(maxValue) ? Math.Clamp(maxValue, 0f, 1f) : 0f;
+            var nyquist = Math.Max(1, snapshotSampleRate / 2.0);
+            var maxFreq = Math.Min(18000, nyquist - 1);
+            var minFreq = 24.0;
+            if (maxFreq <= minFreq)
+            {
+                maxFreq = nyquist;
+                minFreq = 1;
+            }
+
+            var focus = Math.Clamp(lowFrequencyFocus, 0, 1);
+            for (var i = 0; i < pointCount; i++)
+            {
+                var startRatio = i / (double)pointCount;
+                var endRatio = (i + 1) / (double)pointCount;
+                var startHz = LerpLog(minFreq, maxFreq, WarpForLowFrequencyDetail(startRatio, focus));
+                var endHz = LerpLog(minFreq, maxFreq, WarpForLowFrequencyDetail(endRatio, focus));
+                var startBin = FrequencyToBin(startHz, nyquist, spectrumSnapshot.Length);
+                var endBin = FrequencyToBin(endHz, nyquist, spectrumSnapshot.Length);
+                if (endBin < startBin)
+                {
+                    (startBin, endBin) = (endBin, startBin);
+                }
+
+                var maxValue = 0f;
+                for (var bin = startBin; bin <= endBin; bin++)
+                {
+                    maxValue = MathF.Max(maxValue, spectrumSnapshot[bin]);
+                }
+
+                result[i] = float.IsFinite(maxValue) ? Math.Clamp(maxValue, 0f, 1f) : 0f;
+            }
         }
 
         var gateGain = GetAppScopedGate();
@@ -280,8 +313,9 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
 
         lastRoutingRefreshUtc = now;
         preferredProcessIds.Clear();
+        DisposeTargetSessionsLocked();
 
-        if (string.IsNullOrWhiteSpace(normalizedSourceAppId))
+        if (capture is null || string.IsNullOrWhiteSpace(normalizedSourceAppId))
         {
             captureRouteDescription = "system-loopback";
             return;
@@ -301,27 +335,44 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
             for (var i = 0; i < sessions.Count; i++)
             {
                 var session = sessions[i];
-                var pid = session.GetProcessID;
-                if (pid == 0)
+                var keepSession = false;
+                try
                 {
-                    continue;
-                }
+                    var pid = session.GetProcessID;
+                    if (pid == 0)
+                    {
+                        continue;
+                    }
 
-                var processName = TryGetProcessName(pid);
-                if (string.IsNullOrWhiteSpace(processName))
-                {
-                    continue;
-                }
+                    var processName = TryGetProcessName(pid);
+                    if (string.IsNullOrWhiteSpace(processName))
+                    {
+                        continue;
+                    }
 
-                if (IsTargetProcessMatch(processName))
+                    if (IsTargetProcessMatch(processName))
+                    {
+                        preferredProcessIds.Add(pid);
+                        cachedTargetSessions.Add((session, session.AudioMeterInformation));
+                        keepSession = true;
+                    }
+                }
+                catch
                 {
-                    preferredProcessIds.Add(pid);
+                }
+                finally
+                {
+                    if (!keepSession)
+                    {
+                        session.Dispose();
+                    }
                 }
             }
         }
         catch
         {
             preferredProcessIds.Clear();
+            DisposeTargetSessionsLocked();
         }
 
         if (preferredProcessIds.Count == 0 && !string.IsNullOrWhiteSpace(executableHint))
@@ -356,50 +407,49 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
     private float? ReadCurrentPeakForTargetProcessesLocked()
     {
         lastPeakRefreshUtc = DateTimeOffset.UtcNow;
-        EnsureSessionEndpointLocked();
-        if (renderDevice is null || preferredProcessIds.Count == 0)
+        if (renderDevice is null || cachedTargetSessions.Count == 0)
         {
             return null;
         }
 
-        try
+        var maxPeak = 0f;
+        var found = false;
+        for (var i = cachedTargetSessions.Count - 1; i >= 0; i--)
         {
-            renderDevice.AudioSessionManager.RefreshSessions();
-            var sessions = renderDevice.AudioSessionManager.Sessions;
-            var maxPeak = 0f;
-            var found = false;
-            for (var i = 0; i < sessions.Count; i++)
+            var (session, meter) = cachedTargetSessions[i];
+            try
             {
-                var session = sessions[i];
-                if (!preferredProcessIds.Contains(session.GetProcessID))
+                if (session.State == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateExpired)
                 {
+                    session.Dispose();
+                    cachedTargetSessions.RemoveAt(i);
                     continue;
                 }
 
+                maxPeak = Math.Max(maxPeak, meter.MasterPeakValue);
+                found = true;
+            }
+            catch
+            {
                 try
                 {
-                    maxPeak = Math.Max(maxPeak, session.AudioMeterInformation.MasterPeakValue);
-                    found = true;
+                    session.Dispose();
                 }
                 catch
                 {
                 }
-            }
 
-            // Not found: the periodic routing refresh (every RoutingRefreshInterval) re-resolves
-            // the player's processes; no forced re-route per frame.
-            if (!found)
-            {
-                return null;
+                cachedTargetSessions.RemoveAt(i);
             }
-
-            lastPeakValue = maxPeak;
-            return maxPeak;
         }
-        catch
+
+        if (!found)
         {
             return null;
         }
+
+        lastPeakValue = maxPeak;
+        return maxPeak;
     }
 
     private bool IsTargetProcessMatch(string processName)
@@ -475,12 +525,30 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
         }
         catch
         {
-            renderDevice = null;
+            DisposeSessionEndpointLocked();
         }
+    }
+
+    private void DisposeTargetSessionsLocked()
+    {
+        for (var i = 0; i < cachedTargetSessions.Count; i++)
+        {
+            try
+            {
+                cachedTargetSessions[i].Session.Dispose();
+            }
+            catch
+            {
+            }
+        }
+
+        cachedTargetSessions.Clear();
     }
 
     private void DisposeSessionEndpointLocked()
     {
+        DisposeTargetSessionsLocked();
+
         try
         {
             renderDevice?.Dispose();
@@ -719,6 +787,7 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
 
     public void Dispose()
     {
+        isDisposed = true;
         Stop();
     }
 }

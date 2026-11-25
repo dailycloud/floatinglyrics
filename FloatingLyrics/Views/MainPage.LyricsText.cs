@@ -42,23 +42,30 @@ public sealed partial class MainPage
             IsHitTestVisible = false
         };
         lyricsTextOverlay.Draw += OnLyricsTextOverlayDraw;
-        lyricsTextOverlay.CreateResources += (_, args) =>
-        {
-            if (args.Reason == CanvasCreateResourcesReason.NewDevice)
-            {
-                foreach (var item in physicalLyricItems)
-                {
-                    item.TextLayout?.Dispose();
-                    item.TextLayout = null;
-                    item.TextLayoutKey = null;
-                }
-            }
-        };
+        lyricsTextOverlay.CreateResources += OnLyricsTextOverlayCreateResources;
 
         // Directly above the (now text-less) XAML track surface, inside the clipped viewport.
         var index = LyricsCanvas.Children.IndexOf(LyricsTrackSurface);
         LyricsCanvas.Children.Insert(index + 1, lyricsTextOverlay);
         UpdateLyricsTextOverlayBounds();
+    }
+
+    private void OnLyricsTextOverlayCreateResources(CanvasControl sender, CanvasCreateResourcesEventArgs args)
+    {
+        if (args.Reason != CanvasCreateResourcesReason.NewDevice)
+        {
+            return;
+        }
+
+        foreach (var item in physicalLyricItems)
+        {
+            item.TextLayout?.Dispose();
+            item.TextLayout = null;
+            item.TextLayoutKey = null;
+            item.BackgroundLayout?.Dispose();
+            item.BackgroundLayout = null;
+            item.BackgroundLayoutKey = null;
+        }
     }
 
     private void TeardownLyricsTextOverlay()
@@ -69,6 +76,7 @@ public sealed partial class MainPage
         }
 
         lyricsTextOverlay.Draw -= OnLyricsTextOverlayDraw;
+        lyricsTextOverlay.CreateResources -= OnLyricsTextOverlayCreateResources;
         LyricsCanvas.Children.Remove(lyricsTextOverlay);
         lyricsTextOverlay.RemoveFromVisualTree();
         lyricsTextOverlay = null;

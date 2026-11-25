@@ -21,7 +21,9 @@ public sealed class DesktopWallpaperService
 
     private readonly Dictionary<string, (DateTime WriteTime, CanvasBitmap Bitmap)> imageCache = new(StringComparer.OrdinalIgnoreCase);
     private DispatcherQueueTimer? pollTimer;
+    private DispatcherQueue? activeDispatcherQueue;
     private Func<RectInt32?>? hostRectProvider;
+    private bool isSubscribedToEngineFrames;
     private string lastSignature = string.Empty;
     private bool isRebuilding;
     private bool isQuerying;
@@ -91,14 +93,20 @@ public sealed class DesktopWallpaperService
 
     public void Start(DispatcherQueue dispatcherQueue, Func<RectInt32?> getHostScreenRect)
     {
+        activeDispatcherQueue = dispatcherQueue;
         hostRectProvider = getHostScreenRect;
+        if (!isSubscribedToEngineFrames)
+        {
+            WallpaperEngineSource.FrameReady += OnEngineFrameReady;
+            isSubscribedToEngineFrames = true;
+        }
+
         if (pollTimer is null)
         {
-            WallpaperEngineSource.FrameReady += () => dispatcherQueue.TryEnqueue(() => RequestRefresh(force: true));
             pollTimer = dispatcherQueue.CreateTimer();
             pollTimer.Interval = PollInterval;
             pollTimer.IsRepeating = true;
-            pollTimer.Tick += (_, _) => RequestRefresh(force: false);
+            pollTimer.Tick += OnPollTimerTick;
             pollTimer.Start();
         }
 
@@ -107,8 +115,48 @@ public sealed class DesktopWallpaperService
 
     public void Stop()
     {
-        pollTimer?.Stop();
-        pollTimer = null;
+        if (isSubscribedToEngineFrames)
+        {
+            WallpaperEngineSource.FrameReady -= OnEngineFrameReady;
+            isSubscribedToEngineFrames = false;
+        }
+
+        if (pollTimer is not null)
+        {
+            pollTimer.Stop();
+            pollTimer.Tick -= OnPollTimerTick;
+            pollTimer = null;
+        }
+
+        hostRectProvider = null;
+        activeDispatcherQueue = null;
+        rebuildQueued = false;
+        lastSignature = string.Empty;
+        DisposeCachedBitmaps();
+    }
+
+    private void OnEngineFrameReady()
+    {
+        activeDispatcherQueue?.TryEnqueue(() => RequestRefresh(force: true));
+    }
+
+    private void OnPollTimerTick(DispatcherQueueTimer sender, object args)
+    {
+        RequestRefresh(force: false);
+    }
+
+    private void DisposeCachedBitmaps()
+    {
+        foreach (var entry in imageCache.Values)
+        {
+            entry.Bitmap.Dispose();
+        }
+
+        imageCache.Clear();
+        livePatch?.Bitmap.Dispose();
+        livePatch = null;
+        Bitmap?.Dispose();
+        Bitmap = null;
     }
 
     public void RequestRefresh(bool force)
@@ -256,19 +304,15 @@ public sealed class DesktopWallpaperService
     /// <summary>Called when the Win2D device was lost; drops GPU resources and rebuilds.</summary>
     public void OnDeviceLost()
     {
-        foreach (var entry in imageCache.Values)
-        {
-            entry.Bitmap.Dispose();
-        }
-
-        imageCache.Clear();
-        Bitmap = null;
+        DisposeCachedBitmaps();
+        lastSignature = string.Empty;
         RequestRefresh(force: true);
     }
 
     private async Task RebuildAsync(WallpaperLayout layout)
     {
         isRebuilding = true;
+        CanvasRenderTarget? target = null;
         try
         {
             var device = CanvasDevice.GetSharedDevice();
@@ -291,7 +335,7 @@ public sealed class DesktopWallpaperService
                 }
             }
 
-            var target = new CanvasRenderTarget(device, width, height, 96);
+            target = new CanvasRenderTarget(device, width, height, 96);
             var patch = livePatch;
             var usePatch = layout.EngineKey is not null && patch is not null &&
                 string.Equals(patch.EngineKey, layout.EngineKey, StringComparison.Ordinal);
@@ -335,8 +379,9 @@ public sealed class DesktopWallpaperService
 
             var previous = Bitmap;
             Bitmap = target;
+            target = null;
             Origin = new PointInt32(layout.Host.X, layout.Host.Y);
-            AverageColor = ComputeAverageColor(target, layout.BackgroundColor);
+            AverageColor = ComputeAverageColor(Bitmap, layout.BackgroundColor);
             if (previous is not null && !imageCache.Values.Any(v => ReferenceEquals(v.Bitmap, previous)))
             {
                 previous.Dispose();
@@ -347,6 +392,7 @@ public sealed class DesktopWallpaperService
         }
         catch (Exception ex)
         {
+            target?.Dispose();
             DebugTrace.Write($"Wallpaper: rebuild failed {ex.Message}");
         }
         finally

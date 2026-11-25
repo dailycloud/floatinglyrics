@@ -42,6 +42,7 @@ public sealed partial class LiquidGlassSurface : Grid
     private PixelShaderEffect? glassShader;
     private CanvasDevice? glassShaderDevice;
     private float presence = 1;
+    private bool isReleased;
 
     public LiquidGlassSurface()
     {
@@ -55,7 +56,28 @@ public sealed partial class LiquidGlassSurface : Grid
         canvas.Draw += OnDraw;
         canvas.CreateResources += OnCreateResources;
         Children.Add(canvas);
-        Unloaded += (_, _) => ReleaseShader();
+        Unloaded += OnUnloaded;
+    }
+
+    public void Release()
+    {
+        if (isReleased)
+        {
+            return;
+        }
+
+        isReleased = true;
+        Unloaded -= OnUnloaded;
+        canvas.Draw -= OnDraw;
+        canvas.CreateResources -= OnCreateResources;
+        ReleaseShader();
+        Children.Remove(canvas);
+        canvas.RemoveFromVisualTree();
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        ReleaseShader();
     }
 
     // ---- shape -------------------------------------------------------------------------
@@ -149,7 +171,13 @@ public sealed partial class LiquidGlassSurface : Grid
         Height = h + 2 * ShapeMargin;
     }
 
-    public void Invalidate() => canvas.Invalidate();
+    public void Invalidate()
+    {
+        if (!isReleased)
+        {
+            canvas.Invalidate();
+        }
+    }
 
     private void OnCreateResources(CanvasControl sender, CanvasCreateResourcesEventArgs args)
     {
@@ -392,26 +420,34 @@ public sealed partial class LiquidGlassSurface : Grid
 
         shader.Source1 = frosted;
         shader.Source2 = sharp;
-        var reach = (maxShift * (1f + (0.73f * dispersion))) + (magnify * Math.Max(ShapeWidth, ShapeHeight) * 0.5f);
-        var maxOffset = (int)Math.Ceiling(reach * dipToPx) + 4;
-        shader.MaxSamplerOffset = maxOffset;
-        shader.Properties["shapeOrigin"] = new Vector2((float)shape.X * dipToPx, (float)shape.Y * dipToPx);
-        shader.Properties["shapeSize"] = new Vector2(ShapeWidth * dipToPx, ShapeHeight * dipToPx);
-        shader.Properties["radius"] = radius * dipToPx;
-        shader.Properties["bevel"] = bevel * dipToPx;
-        shader.Properties["refraction"] = maxShift * dipToPx;
-        shader.Properties["dispersion"] = dispersion;
-        shader.Properties["magnify"] = magnify;
-        shader.Properties["rimClarity"] = 0.8f;
-        shader.Properties["specular"] = Math.Clamp(Specular, 0f, 1f) * visibility;
-        shader.Properties["glint"] = glint;
-        shader.Properties["saturationBoost"] = 0.35f * visibility;
-        shader.Properties["tint"] = new Vector4(tint.R / 255f, tint.G / 255f, tint.B / 255f, Math.Clamp(TintOpacity, 0f, 1f) * visibility);
-        shader.Properties["lightDir"] = lightDir;
-
-        using (ds.CreateLayer(1f, shape))
+        try
         {
-            ds.DrawImage(shader);
+            var reach = (maxShift * (1f + (0.73f * dispersion))) + (magnify * Math.Max(ShapeWidth, ShapeHeight) * 0.5f);
+            var maxOffset = (int)Math.Ceiling(reach * dipToPx) + 4;
+            shader.MaxSamplerOffset = maxOffset;
+            shader.Properties["shapeOrigin"] = new Vector2((float)shape.X * dipToPx, (float)shape.Y * dipToPx);
+            shader.Properties["shapeSize"] = new Vector2(ShapeWidth * dipToPx, ShapeHeight * dipToPx);
+            shader.Properties["radius"] = radius * dipToPx;
+            shader.Properties["bevel"] = bevel * dipToPx;
+            shader.Properties["refraction"] = maxShift * dipToPx;
+            shader.Properties["dispersion"] = dispersion;
+            shader.Properties["magnify"] = magnify;
+            shader.Properties["rimClarity"] = 0.8f;
+            shader.Properties["specular"] = Math.Clamp(Specular, 0f, 1f) * visibility;
+            shader.Properties["glint"] = glint;
+            shader.Properties["saturationBoost"] = 0.35f * visibility;
+            shader.Properties["tint"] = new Vector4(tint.R / 255f, tint.G / 255f, tint.B / 255f, Math.Clamp(TintOpacity, 0f, 1f) * visibility);
+            shader.Properties["lightDir"] = lightDir;
+
+            using (ds.CreateLayer(1f, shape))
+            {
+                ds.DrawImage(shader);
+            }
+        }
+        finally
+        {
+            shader.Source1 = null;
+            shader.Source2 = null;
         }
     }
 

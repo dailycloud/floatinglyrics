@@ -66,10 +66,12 @@ public sealed partial class MainPage
     private Rect panelRectInRoot;
     private Storyboard? settingsPageStoryboard;
     private Storyboard? anchorStoryboard;
+    private Point pendingAnchorTarget;
     private DispatcherQueueTimer? desktopWatchdogTimer;
     private string centerTextWidthKey = string.Empty;
     private double centerTextWidth = double.NaN;
     private readonly List<(Panel Panel, Func<string> Get)> choiceGroups = [];
+    private readonly List<(RadioButton Radio, RoutedEventHandler Handler)> choiceHandlers = [];
     private readonly CompositeTransform settingsContentTransform = new();
     private readonly ScaleTransform toolbarButtonsScale = new();
 
@@ -154,6 +156,7 @@ public sealed partial class MainPage
         glassInitialized = false;
         StopGlassRenderLoop();
         DesktopWallpaperService.Instance.Changed -= OnWallpaperChanged;
+        DesktopWallpaperService.Instance.Stop();
         if (XamlRoot is not null)
         {
             XamlRoot.Changed -= OnXamlRootChanged;
@@ -166,8 +169,13 @@ public sealed partial class MainPage
             desktopWatchdogTimer = null;
         }
 
-        settingsPageStoryboard?.Stop();
-        anchorStoryboard?.Stop();
+        StopSettingsPageStoryboard();
+        StopAnchorStoryboard();
+        UnregisterChoiceGroups();
+        GlassPlate.Release();
+        ToolbarGlass.Release();
+        SettingsGlass.Release();
+        ReleaseLiveBackdropCache();
     }
 
     private void OnXamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs args)
@@ -186,6 +194,11 @@ public sealed partial class MainPage
     {
         _ = DispatcherQueue.TryEnqueue(() =>
         {
+            if (!glassInitialized || isPageUnloaded)
+            {
+                return;
+            }
+
             try
             {
                 UpdateArtworkSwatch();
@@ -395,6 +408,11 @@ public sealed partial class MainPage
     {
         _ = DispatcherQueue.TryEnqueue(() =>
         {
+            if (!glassInitialized || isPageUnloaded)
+            {
+                return;
+            }
+
             lastWidgetHoverUtc = DateTimeOffset.UtcNow;
             OpenSettingsPanel();
         });
@@ -489,7 +507,7 @@ public sealed partial class MainPage
             return;
         }
 
-        settingsPageStoryboard?.Stop();
+        StopSettingsPageStoryboard();
         var storyboard = new Storyboard();
         var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
         var delayIndex = 0;
@@ -522,6 +540,17 @@ public sealed partial class MainPage
 
         settingsPageStoryboard = storyboard;
         storyboard.Begin();
+    }
+
+    private void StopSettingsPageStoryboard()
+    {
+        if (settingsPageStoryboard is null)
+        {
+            return;
+        }
+
+        settingsPageStoryboard.Stop();
+        settingsPageStoryboard = null;
     }
 
     private void AnchorButton_OnClick(object sender, RoutedEventArgs e)
@@ -562,7 +591,8 @@ public sealed partial class MainPage
         var margin = OverlayRootHost.Margin;
         var target = ClampOverlayRootOffset(new Point(left - margin.Left - plate.X, top - margin.Top - plate.Y));
 
-        anchorStoryboard?.Stop();
+        StopAnchorStoryboard();
+        pendingAnchorTarget = target;
         var duration = new Duration(TimeSpan.FromMilliseconds(520));
         var easing = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.22 };
         var storyboard = new Storyboard();
@@ -574,23 +604,38 @@ public sealed partial class MainPage
         Storyboard.SetTargetProperty(ay, nameof(TranslateTransform.Y));
         storyboard.Children.Add(ax);
         storyboard.Children.Add(ay);
-        storyboard.Completed += (_, _) =>
-        {
-            isAnchorAnimating = false;
-            anchorStoryboard = null;
-            ApplyOverlayRootOffset(target, persist: true);
-            RequestGlassFrame();
-        };
+        storyboard.Completed += OnAnchorStoryboardCompleted;
         anchorStoryboard = storyboard;
         isAnchorAnimating = true;
         storyboard.Begin();
         EnsureGlassRenderLoop();
     }
 
+    private void OnAnchorStoryboardCompleted(object? sender, object e)
+    {
+        StopAnchorStoryboard();
+        ApplyOverlayRootOffset(pendingAnchorTarget, persist: true);
+        RequestGlassFrame();
+    }
+
+    private void StopAnchorStoryboard()
+    {
+        isAnchorAnimating = false;
+        if (anchorStoryboard is null)
+        {
+            return;
+        }
+
+        anchorStoryboard.Completed -= OnAnchorStoryboardCompleted;
+        anchorStoryboard.Stop();
+        anchorStoryboard = null;
+    }
+
     // ------------------------------------------------------------------ choice groups
 
     private void RegisterChoiceGroups()
     {
+        UnregisterChoiceGroups();
         BindChoice(GlassVisibilityChoices,
             () => ViewModel.GlassVisibility.ToString(),
             v => ViewModel.GlassVisibility = Enum.Parse<GlassVisibilityMode>(v));
@@ -635,6 +680,17 @@ public sealed partial class MainPage
             v => ViewModel.LineAnimationStyle = Enum.Parse<LineAnimationStyle>(v));
     }
 
+    private void UnregisterChoiceGroups()
+    {
+        foreach (var (radio, handler) in choiceHandlers)
+        {
+            radio.Checked -= handler;
+        }
+
+        choiceHandlers.Clear();
+        choiceGroups.Clear();
+    }
+
     private void BindChoice(Panel panel, Func<string> get, Action<string> set)
     {
         foreach (var child in panel.Children)
@@ -644,7 +700,7 @@ public sealed partial class MainPage
                 continue;
             }
 
-            radio.Checked += (_, _) =>
+            RoutedEventHandler handler = (_, _) =>
             {
                 if (isSyncingChoices || radio.Tag is not string tag || tag == get())
                 {
@@ -654,6 +710,8 @@ public sealed partial class MainPage
                 set(tag);
                 SyncChoiceGroups();
             };
+            radio.Checked += handler;
+            choiceHandlers.Add((radio, handler));
         }
 
         choiceGroups.Add((panel, get));
@@ -694,10 +752,23 @@ public sealed partial class MainPage
 
     private void UpdateArtworkSwatch()
     {
-        if (ArtworkTintSwatch is not null)
+        if (ArtworkTintSwatch is null)
         {
-            ArtworkTintSwatch.Background = new SolidColorBrush(ViewModel.ArtworkAccentColor);
+            return;
         }
+
+        var color = ViewModel.ArtworkAccentColor;
+        if (ArtworkTintSwatch.Background is SolidColorBrush brush)
+        {
+            if (brush.Color != color)
+            {
+                brush.Color = color;
+            }
+
+            return;
+        }
+
+        ArtworkTintSwatch.Background = new SolidColorBrush(color);
     }
 
     /// <summary>Called from the main property-changed handler for glass/typography settings.</summary>
@@ -797,12 +868,24 @@ public sealed partial class MainPage
             family = custom;
         }
 
-        currentLineFontFamily = new FontFamily(family);
+        if (!string.Equals(currentLineFontFamily.Source, family, StringComparison.Ordinal))
+        {
+            currentLineFontFamily = new FontFamily(family);
+        }
+
         nextLineFontFamily = currentLineFontFamily;
 
-        // A custom font applies to the whole widget; presets keep the designed title fonts.
-        TrackTitleText.FontFamily = string.IsNullOrEmpty(custom) ? new FontFamily("Bahnschrift SemiBold") : new FontFamily(custom);
-        ArtistNameText.FontFamily = string.IsNullOrEmpty(custom) ? new FontFamily("Segoe UI Variable Text") : new FontFamily(custom);
+        var titleFontName = string.IsNullOrEmpty(custom) ? "Bahnschrift SemiBold" : custom;
+        if (!string.Equals(TrackTitleText.FontFamily?.Source, titleFontName, StringComparison.Ordinal))
+        {
+            TrackTitleText.FontFamily = new FontFamily(titleFontName);
+        }
+
+        var artistFontName = string.IsNullOrEmpty(custom) ? "Segoe UI Variable Text" : custom;
+        if (!string.Equals(ArtistNameText.FontFamily?.Source, artistFontName, StringComparison.Ordinal))
+        {
+            ArtistNameText.FontFamily = new FontFamily(artistFontName);
+        }
         if (CustomFontValue is not null)
         {
             CustomFontValue.Text = string.IsNullOrEmpty(custom) ? "не выбран" : custom;

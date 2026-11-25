@@ -384,12 +384,24 @@ public partial class App : Application
 
     private void OnSettingsFileChanged(object sender, FileSystemEventArgs e)
     {
-        _ = uiDispatcherQueue?.TryEnqueue(() => Services.MainViewModel.ReloadSettingsFromDisk());
+        _ = uiDispatcherQueue?.TryEnqueue(() =>
+        {
+            if (!isDisposed)
+            {
+                Services.MainViewModel.ReloadSettingsFromDisk();
+            }
+        });
     }
 
     private void OnSettingsFileRenamed(object sender, RenamedEventArgs e)
     {
-        _ = uiDispatcherQueue?.TryEnqueue(() => Services.MainViewModel.ReloadSettingsFromDisk());
+        _ = uiDispatcherQueue?.TryEnqueue(() =>
+        {
+            if (!isDisposed)
+            {
+                Services.MainViewModel.ReloadSettingsFromDisk();
+            }
+        });
     }
 
     private void DisposeSettingsWatcher()
@@ -426,12 +438,18 @@ public partial class App : Application
 
         mainViewModelChangedHandler = (_, e) =>
         {
-            if (e.PropertyName is not nameof(MainViewModel.ShowLineTimings))
+            if (isDisposed || e.PropertyName is not nameof(MainViewModel.ShowLineTimings))
             {
                 return;
             }
 
-            _ = uiDispatcherQueue?.TryEnqueue(SyncTrayMenuState);
+            _ = uiDispatcherQueue?.TryEnqueue(() =>
+            {
+                if (!isDisposed)
+                {
+                    SyncTrayMenuState();
+                }
+            });
         };
         Services.MainViewModel.PropertyChanged += mainViewModelChangedHandler;
         SyncTrayMenuState();

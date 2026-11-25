@@ -350,6 +350,35 @@ public sealed partial class MainPage
     private Microsoft.UI.Composition.SpriteVisual? titleHaloVisual;
     private Microsoft.UI.Composition.SpriteVisual? artistHaloVisual;
 
+    private void ReleaseTitleHalos()
+    {
+        if (titleHaloVisual is not null)
+        {
+            if (TitleHaloHost is not null)
+            {
+                Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetElementChildVisual(TitleHaloHost, null);
+            }
+
+            titleHaloVisual.Shadow?.Dispose();
+            titleHaloVisual.Brush?.Dispose();
+            titleHaloVisual.Dispose();
+            titleHaloVisual = null;
+        }
+
+        if (artistHaloVisual is not null)
+        {
+            if (ArtistHaloHost is not null)
+            {
+                Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.SetElementChildVisual(ArtistHaloHost, null);
+            }
+
+            artistHaloVisual.Shadow?.Dispose();
+            artistHaloVisual.Brush?.Dispose();
+            artistHaloVisual.Dispose();
+            artistHaloVisual = null;
+        }
+    }
+
     /// <summary>
     /// Text-masked composition drop shadows behind the (XAML) title and artist, in the colour
     /// opposite to the text. Strength follows contrastHalo: subtle on uniform wallpapers, dense
