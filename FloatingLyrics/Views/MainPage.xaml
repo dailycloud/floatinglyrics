@@ -75,10 +75,72 @@
         <Style x:Key="GlassToggleStyle" TargetType="ToggleSwitch">
             <Setter Property="OnContent" Value="" />
             <Setter Property="OffContent" Value="" />
-            <Setter Property="MinWidth" Value="0" />
-            <Setter Property="Margin" Value="0,-6,-10,-6" />
+            <Setter Property="MinWidth" Value="44" />
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
             <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="UseSystemFocusVisuals" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleSwitch">
+                        <Grid Width="44" Height="24" Background="Transparent">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver" />
+                                    <VisualState x:Name="Pressed" />
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="SwitchContainer.Opacity" Value="0.45" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                                <VisualStateGroup x:Name="ToggleStates">
+                                    <VisualState x:Name="Off">
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="KnobTranslate" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.16" />
+                                        </Storyboard>
+                                    </VisualState>
+                                    <VisualState x:Name="On">
+                                        <VisualState.Setters>
+                                            <Setter Target="OuterBorder.Background" Value="{ThemeResource ToggleSwitchFillOn}" />
+                                            <Setter Target="OuterBorder.BorderBrush" Value="{ThemeResource ToggleSwitchStrokeOn}" />
+                                            <Setter Target="SwitchKnob.Fill" Value="{ThemeResource ToggleSwitchKnobFillOn}" />
+                                        </VisualState.Setters>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="KnobTranslate" Storyboard.TargetProperty="X" To="20" Duration="0:0:0.16" />
+                                        </Storyboard>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <Grid x:Name="SwitchContainer" Width="44" Height="24">
+                                <Border x:Name="OuterBorder"
+                                        Width="44"
+                                        Height="24"
+                                        CornerRadius="12"
+                                        BorderThickness="1"
+                                        Background="{ThemeResource ToggleSwitchFillOff}"
+                                        BorderBrush="{ThemeResource ToggleSwitchStrokeOff}" />
+                                <Border x:Name="SwitchKnobBounds" Padding="3">
+                                    <Ellipse x:Name="SwitchKnob"
+                                             Width="16"
+                                             Height="16"
+                                             HorizontalAlignment="Left"
+                                             VerticalAlignment="Center"
+                                             Fill="{ThemeResource ToggleSwitchKnobFillOff}">
+                                        <Ellipse.RenderTransform>
+                                            <TranslateTransform x:Name="KnobTranslate" X="0" />
+                                        </Ellipse.RenderTransform>
+                                    </Ellipse>
+                                </Border>
+                            </Grid>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="GlassSectionTitleStyle" TargetType="TextBlock">
@@ -1164,6 +1226,8 @@
                         VerticalAlignment="Top" />
                     <StackPanel
                         x:Name="WidgetToolbarButtons"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Top"
                         Orientation="Horizontal"
                         Padding="6"
                         Spacing="4">
@@ -1436,12 +1500,12 @@
                                             <RadioButton GroupName="LyricsColor" Tag="IceBlue" Background="#FFB3DAF6" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Лёд" />
                                             <RadioButton GroupName="LyricsColor" Tag="Mint" Background="#FFA0ECD4" Style="{StaticResource GlassSwatchStyle}" AutomationProperties.Name="Мята" />
                                         </StackPanel>
-                                        <Grid>
-                                            <StackPanel Margin="0,0,60,0">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <StackPanel Grid.Column="0">
                                                 <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Цвета из обложки" />
                                                 <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="Подстраивать оттенок под альбом" />
                                             </StackPanel>
-                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.UseArtworkTextColors, Mode=TwoWay}" />
+                                            <ToggleSwitch Grid.Column="1" Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.UseArtworkTextColors, Mode=TwoWay}" />
                                         </Grid>
                                     </StackPanel>
                                 </Border>
@@ -1625,12 +1689,12 @@
                             <StackPanel x:Name="SettingsPageMotion" Spacing="8" Visibility="Collapsed">
                                 <TextBlock Style="{StaticResource GlassSectionTitleStyle}" Text="ПО СЛОВАМ" />
                                 <Border Style="{StaticResource GlassGroupStyle}">
-                                    <Grid>
-                                        <StackPanel Margin="0,0,60,0">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                        <StackPanel Grid.Column="0">
                                             <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Подсветка по словам" />
                                             <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="{x:Bind local:MainPage.FormatSpicyStatus(ViewModel.HasSpicyLyricsKey), Mode=OneWay}" />
                                         </StackPanel>
-                                        <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.WordByWordHighlight, Mode=TwoWay}" />
+                                        <ToggleSwitch Grid.Column="1" Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.WordByWordHighlight, Mode=TwoWay}" />
                                     </Grid>
                                 </Border>
                                 <Border Style="{StaticResource GlassGroupStyle}">
@@ -1684,12 +1748,12 @@
                                             <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Зеркальные полосы" />
                                             <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.OscilloscopeMirrorBars, Mode=TwoWay}" />
                                         </Grid>
-                                        <Grid>
-                                            <StackPanel Margin="0,0,60,0">
+                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                            <StackPanel Grid.Column="0">
                                                 <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Звук только плеера" />
                                                 <TextBlock Style="{StaticResource GlassCaptionStyle}" Text="Бета: захват аудио активного приложения" />
                                             </StackPanel>
-                                            <ToggleSwitch Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.AppScopedAudioCapture, Mode=TwoWay}" />
+                                            <ToggleSwitch Grid.Column="1" Style="{StaticResource GlassToggleStyle}" IsOn="{x:Bind ViewModel.AppScopedAudioCapture, Mode=TwoWay}" />
                                         </Grid>
                                         <Grid>
                                             <TextBlock Style="{StaticResource GlassLabelStyle}" Text="Чувствительность" />

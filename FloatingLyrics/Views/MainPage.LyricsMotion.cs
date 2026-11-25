@@ -20,6 +20,7 @@ namespace FloatingLyrics.Views;
 public sealed partial class MainPage
 {
     private readonly Stopwatch lyricsClock = Stopwatch.StartNew();
+    private readonly List<PhysicalLyricItem> outgoingLyricItems = [];
     private bool isLyricsLoopActive;
     private double lastLyricsFrameSeconds;
 
@@ -61,29 +62,11 @@ public sealed partial class MainPage
             item.OffsetY.Configure(stiffness, damping);
             item.Active.Configure(stiffness * 1.15, damping * 1.07);
             item.ActiveScale = GetPhysicalItemActiveScale(item);
-
-            var isVisible = item.Active.Value > 0.02 || item.ContentHost.Opacity > 0.02;
-            if (i < targetIndex && (isVisible || item.IsExiting))
-            {
-                // Outgoing line: it does not slide away. It stays where it is, shrinks toward the
-                // centre of its text and fades out quickly while the next line rises into place.
-                var exitStiffness = stiffness * 2.4;
-                item.Active.Configure(exitStiffness, 2 * Math.Sqrt(exitStiffness));
-                item.OffsetY.Target = item.OffsetY.Value;
-                item.OffsetY.Velocity = 0;
-                item.IsExiting = true;
-                item.PendingOffset = item.OffsetY.Value;
-                item.PendingActive = 0;
-                item.StartAt = now;
-                item.HasPending = true;
-                continue;
-            }
-
             item.IsExiting = false;
+            item.ExitScale = 1;
 
-            // The new line leads, then the following lines rise in a wave.
-            var rel = forward ? i - targetIndex : targetIndex - i + 1;
-            var delay = Math.Clamp(rel, 0, 6) * stagger;
+            var rel = forward ? i - targetIndex : targetIndex - i;
+            var delay = rel <= 0 ? 0 : Math.Clamp(rel, 0, 6) * stagger;
             item.PendingOffset = targetOffset;
             item.OverlapActive = i > targetIndex && item.Line is { } overlapping && overlapping.IsSoundingAt(playback);
             item.PendingActive = i == targetIndex || item.OverlapActive ? 1 : 0;
@@ -116,6 +99,136 @@ public sealed partial class MainPage
         {
             ApplyPhysicalItemVisual(item);
         }
+    }
+
+    private void BeginPhysicalSpringTransitionFromOutgoing(int targetIndex)
+    {
+        if (physicalLyricItems.Count == 0)
+        {
+            return;
+        }
+
+        if (outgoingLyricItems.Count == 0)
+        {
+            StartPhysicalTrackIntroFromBottom(targetIndex);
+            return;
+        }
+
+        var clamped = Math.Clamp(targetIndex, 0, physicalLyricItems.Count - 1);
+        var step = Math.Max(1, physicalLineStep);
+        var outgoingBottom = step;
+        foreach (var outgoing in outgoingLyricItems)
+        {
+            var bottom = Canvas.GetTop(outgoing.Layer) + outgoing.OffsetY.Value + step;
+            if (bottom > outgoingBottom)
+            {
+                outgoingBottom = bottom;
+            }
+        }
+
+        var startOffset = outgoingBottom;
+        var targetOffset = -PhysicalItemTop(clamped);
+        var scrollDelta = targetOffset - startOffset;
+
+        for (var i = 0; i < physicalLyricItems.Count; i++)
+        {
+            var item = physicalLyricItems[i];
+            ApplyNextLineTypography(item.MainText, item.ShadowText);
+            SetTextLayerFontSize(item.MainText, item.ShadowText, ViewModel.NextLineFontSize);
+            item.ActiveScale = GetPhysicalItemActiveScale(item);
+            item.OffsetY.Snap(startOffset);
+            item.Active.Snap(0);
+            item.IsExiting = false;
+            item.ExitScale = 1;
+        }
+
+        ApplyPhysicalTrackAlignment(GetLyricsHorizontalLayout());
+
+        var (stiffness, damping, stagger) = ResolveLineSpring();
+        var now = lyricsClock.Elapsed.TotalSeconds;
+        var playback = ViewModel.GetInterpolatedPlaybackPosition();
+
+        foreach (var outgoing in outgoingLyricItems)
+        {
+            outgoing.OffsetY.Configure(stiffness, damping);
+            outgoing.Active.Configure(stiffness * 1.15, damping * 1.07);
+            outgoing.IsExiting = false;
+            outgoing.ExitScale = 1;
+            outgoing.PendingOffset = outgoing.OffsetY.Value + scrollDelta;
+            outgoing.PendingActive = 0;
+            outgoing.StartAt = now;
+            outgoing.HasPending = true;
+        }
+
+        for (var i = 0; i < physicalLyricItems.Count; i++)
+        {
+            var item = physicalLyricItems[i];
+            item.OffsetY.Configure(stiffness, damping);
+            item.Active.Configure(stiffness * 1.15, damping * 1.07);
+            var rel = i - clamped;
+            var delay = rel <= 0 ? 0 : Math.Clamp(rel, 0, 6) * stagger;
+            item.PendingOffset = targetOffset;
+            item.OverlapActive = i > clamped && item.Line is { } overlapping && overlapping.IsSoundingAt(playback);
+            item.PendingActive = i == clamped || item.OverlapActive ? 1 : 0;
+            item.StartAt = now + delay;
+            item.HasPending = true;
+            ApplyPhysicalItemVisual(item);
+        }
+
+        physicalRenderedIndex = clamped;
+        EnsureLyricsLoop();
+    }
+
+    private void CaptureOutgoingLyricItems()
+    {
+        if (physicalLyricItems.Count == 0 || physicalRenderedIndex < 0)
+        {
+            return;
+        }
+
+        var start = Math.Clamp(physicalRenderedIndex, 0, physicalLyricItems.Count - 1);
+        var end = Math.Clamp(start + 1, 0, physicalLyricItems.Count - 1);
+        var captured = new List<PhysicalLyricItem>();
+        for (var i = start; i <= end; i++)
+        {
+            var candidate = physicalLyricItems[i];
+            if (!candidate.IsVisualizer && !string.IsNullOrEmpty(candidate.MainText.Text))
+            {
+                captured.Add(candidate);
+            }
+        }
+
+        if (captured.Count == 0)
+        {
+            return;
+        }
+
+        DisposeOutgoingLyricItems();
+        foreach (var item in captured)
+        {
+            physicalLyricItems.Remove(item);
+            outgoingLyricItems.Add(item);
+        }
+    }
+
+    private void DisposeOutgoingLyricItems()
+    {
+        if (outgoingLyricItems.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var item in outgoingLyricItems)
+        {
+            LyricsTrackSurface.Children.Remove(item.Layer);
+            item.TextLayout?.Dispose();
+            item.TextLayout = null;
+            item.BackgroundLayout?.Dispose();
+            item.BackgroundLayout = null;
+            item.Line = null;
+        }
+
+        outgoingLyricItems.Clear();
     }
 
     /// <summary>Puts every line at rest for <paramref name="targetIndex"/> (no animation).</summary>
@@ -178,6 +291,21 @@ public sealed partial class MainPage
             }
 
             var moving = false;
+            foreach (var item in outgoingLyricItems)
+            {
+                if (item.HasPending && now >= item.StartAt)
+                {
+                    item.OffsetY.Target = item.PendingOffset;
+                    item.Active.Target = item.PendingActive;
+                    item.HasPending = false;
+                }
+
+                moving |= item.HasPending;
+                moving |= item.OffsetY.Step(dt);
+                moving |= item.Active.Step(dt);
+                ApplyPhysicalItemVisual(item);
+            }
+
             foreach (var item in physicalLyricItems)
             {
                 if (item.HasPending && now >= item.StartAt)
@@ -193,7 +321,6 @@ public sealed partial class MainPage
 
                 if (item.IsExiting && !item.HasPending && item.Active.Target <= 0 && item.Active.Value < 0.01)
                 {
-                    // Fully gone: park it in its normal place in the track (invisible).
                     item.IsExiting = false;
                     item.Active.Snap(0);
                     item.OffsetY.Snap(-PhysicalItemTop(physicalRenderedIndex));
@@ -204,6 +331,7 @@ public sealed partial class MainPage
             UpdatePhysicalTrackViewportFade();
             if (!moving)
             {
+                DisposeOutgoingLyricItems();
                 StopLyricsLoop();
                 if (activePhysicalTrackPlan.ContainsVisualizer || ViewModel.VisualizerVisibility == Visibility.Visible)
                 {

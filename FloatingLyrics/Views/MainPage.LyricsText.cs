@@ -149,6 +149,28 @@ public sealed partial class MainPage
 
     private void DrawAllLines(CanvasControl sender, CanvasDrawingSession ds, ICanvasImage? invertFill)
     {
+        foreach (var item in outgoingLyricItems)
+        {
+            if (item.IsVisualizer || string.IsNullOrEmpty(item.MainText.Text))
+            {
+                continue;
+            }
+
+            try
+            {
+                DrawLyricLine(sender, ds, item, invertFill);
+            }
+            catch (Exception ex) when (sender.Device.IsDeviceLost(ex.HResult))
+            {
+                sender.Device.RaiseDeviceLost();
+                return;
+            }
+            catch (Exception ex)
+            {
+                DebugTrace.Write($"LyricsText: draw failed {ex.Message}");
+            }
+        }
+
         foreach (var item in physicalLyricItems)
         {
             if (item.IsVisualizer || string.IsNullOrEmpty(item.MainText.Text))

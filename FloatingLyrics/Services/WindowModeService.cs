@@ -300,6 +300,21 @@ public sealed class WindowModeService : IWindowModeService
             return false;
         }
 
+        if (CurrentMode == WindowPresentationMode.Wallpaper)
+        {
+            var existingParent = GetParent(hwnd);
+            if (attachedHost != 0 && IsWindow(attachedHost) && existingParent == attachedHost)
+            {
+                ApplyHostBoundsAndZOrder(attachedHost);
+                return true;
+            }
+
+            if (attachedHost == 0 && existingParent == 0 && (GetWindowLongPtr(hwnd, GwlStyle) & WsChild) == 0)
+            {
+                return true;
+            }
+        }
+
         DebugTrace.Write("WindowModeService: switching to Wallpaper");
 
         _ = SetWindowPos(
@@ -612,7 +627,7 @@ public sealed class WindowModeService : IWindowModeService
     {
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
         var displayArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary);
-        return displayArea.WorkArea;
+        return displayArea?.WorkArea ?? new RectInt32(0, 0, 1920, 1080);
     }
 
     private bool ApplyAbsolutePosition(int x, int y)

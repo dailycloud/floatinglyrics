@@ -102,6 +102,10 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     private Color artworkHighAccentColor = Color.FromArgb(255, 74, 255, 142);
     private long lastAppliedSettingsWriteTicks;
     private string updateReleaseUrl = string.Empty;
+    private bool isUpdateNotificationAvailable;
+    private bool isUpdateNotificationDismissed;
+    private string availableUpdateVersion = string.Empty;
+    private string availableUpdateAssetUrl = string.Empty;
     private readonly Version appVersion;
 
     public MainViewModel(
@@ -151,6 +155,16 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         playbackTimer.Interval = TimeSpan.FromMilliseconds(100);
         playbackTimer.IsRepeating = true;
         playbackTimer.Tick += OnPlaybackTimerTick;
+
+        autoSaveTimer = dispatcherQueue.CreateTimer();
+        autoSaveTimer.Interval = TimeSpan.FromMilliseconds(180);
+        autoSaveTimer.IsRepeating = false;
+        autoSaveTimer.Tick += OnAutoSaveTimerTick;
+
+        paletteTransitionTimer = dispatcherQueue.CreateTimer();
+        paletteTransitionTimer.Interval = TimeSpan.FromMilliseconds(16);
+        paletteTransitionTimer.IsRepeating = true;
+        paletteTransitionTimer.Tick += OnPaletteTransitionTimerTick;
         if (!settingsOnlyMode)
         {
             playbackTimer.Start();
@@ -495,6 +509,8 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         !string.IsNullOrWhiteSpace(GitHubOwner) &&
         !string.IsNullOrWhiteSpace(GitHubRepository);
     public bool HasUpdateReleaseUrl => !string.IsNullOrWhiteSpace(GetUpdateReleaseUrl());
+    public bool ShouldShowUpdateNotification => isUpdateNotificationAvailable && !isUpdateNotificationDismissed;
+    public string AvailableUpdateVersion => availableUpdateVersion;
     public string UpdateRepositoryText => IsGitHubUpdateConfigured
         ? $"{GitHubOwner.Trim()}/{GitHubRepository.Trim()}"
         : L("Repository is not configured", "Репозиторий не настроен");
@@ -515,15 +531,44 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     private SolidColorBrush? nextLineBrushCache;
     private SolidColorBrush? timingBrushCache;
     private SolidColorBrush? textShadowBrushCache;
+    private readonly DispatcherQueueTimer autoSaveTimer;
+    private readonly DispatcherQueueTimer paletteTransitionTimer;
+    private bool hasPendingSettingsSave;
+    private bool isPaletteTransitionActive;
+    private long paletteTransitionStartTimestamp;
+    private Color fromArtworkDominantColor;
+    private Color targetArtworkDominantColor;
+    private Color fromLowAccentColor;
+    private Color targetLowAccentColor;
+    private Color fromMidAccentColor;
+    private Color targetMidAccentColor;
+    private Color fromHighAccentColor;
+    private Color targetHighAccentColor;
+    private Color fromTrackTitleColor;
+    private Color targetTrackTitleColor;
+    private Color fromArtistColor;
+    private Color targetArtistColor;
+    private Color fromCurrentLineColor;
+    private Color targetCurrentLineColor;
+    private Color fromPreviousLineColor;
+    private Color targetPreviousLineColor;
+    private Color fromNextLineColor;
+    private Color targetNextLineColor;
+    private Color fromTimingColor;
+    private Color targetTimingColor;
+    private Color fromShadowColor;
+    private Color targetShadowColor;
     private bool isDisposed;
 
-    private static SolidColorBrush GetOrUpdateBrush(ref SolidColorBrush? cache, Color color)
+    public event Action? PaletteColorsTicked;
+
+    private SolidColorBrush GetOrUpdateBrush(ref SolidColorBrush? cache, Color color)
     {
         if (cache is null)
         {
             cache = new SolidColorBrush(color);
         }
-        else if (cache.Color != color)
+        else if (!isPaletteTransitionActive && cache.Color != color)
         {
             cache.Color = color;
         }
@@ -642,14 +687,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
     private void NotifyPaletteChanged()
     {
-        OnPropertyChanged(nameof(UseDarkText));
-        OnPropertyChanged(nameof(TrackTitleBrush));
-        OnPropertyChanged(nameof(ArtistBrush));
-        OnPropertyChanged(nameof(CurrentLineBrush));
-        OnPropertyChanged(nameof(PreviousLineBrush));
-        OnPropertyChanged(nameof(NextLineBrush));
-        OnPropertyChanged(nameof(TimingBrush));
-        OnPropertyChanged(nameof(TextShadowBrush));
+        StartPaletteTransition(animate: !suppressSettingsPropertyHandlers);
     }
 
     // ---- playback clock for word-by-word highlighting ----
@@ -1348,13 +1386,27 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             if (!string.IsNullOrEmpty(previousTrackKey) &&
                 !string.Equals(previousTrackKey, activeTrackKey, StringComparison.Ordinal))
             {
-                // Drop the previous song's lines right away (visualizer shows while the new
-                // lyrics are fetched) instead of leaving stale lyrics under the new title.
-                LoadTimeline(Array.Empty<LyricLine>(), snapshot.Position, providerSaysSynced: false);
+                ClearLyricsForLoading();
             }
 
             knownTrackDuration = snapshot.Track.Duration;
-            var result = await lyricsProvider.GetLyricsAsync(snapshot.Track, disposeTokenSource.Token);
+            if (TrackQueryNormalization.ShouldSkipLyricsSearch(snapshot.Track))
+            {
+                LyricsAttribution = string.Empty;
+                LyricsAttributionUrl = null;
+                SourceText = L("Source: excluded", "Источник: исключено");
+                HasLyricsContent = false;
+                ActivateVisualizerMode();
+                StatusText = L("Lyrics search skipped for DJ segment. Visualizer mode enabled.", "Поиск текста пропущен (DJ-сегмент). Включен визуализатор.");
+                return;
+            }
+
+            var cleanedSearchArtist = TrackQueryNormalization.StripArtistTopicSuffix(snapshot.Track.Artist);
+            var searchTrack = string.Equals(cleanedSearchArtist, snapshot.Track.Artist, StringComparison.Ordinal)
+                ? snapshot.Track
+                : snapshot.Track with { Artist = cleanedSearchArtist };
+
+            var result = await lyricsProvider.GetLyricsAsync(searchTrack, disposeTokenSource.Token);
             if (knownTrackDuration is null && result?.SourceDuration is { } sourceDuration && sourceDuration > TimeSpan.Zero)
             {
                 knownTrackDuration = sourceDuration;
@@ -1550,7 +1602,9 @@ public partial class MainViewModel : BaseViewModel, IDisposable
     private bool CanCheckForUpdates() => !IsUpdateCheckInProgress;
 
     [RelayCommand(CanExecute = nameof(CanCheckForUpdates))]
-    private async Task CheckForUpdatesAsync()
+    private Task CheckForUpdatesAsync() => CheckForUpdatesCoreAsync(autoInstall: true);
+
+    private async Task CheckForUpdatesCoreAsync(bool autoInstall)
     {
         if (IsUpdateCheckInProgress)
         {
@@ -1590,32 +1644,17 @@ public partial class MainViewModel : BaseViewModel, IDisposable
                     ? $"Доступно обновление: v{result.LatestVersion}"
                     : $"Update available: v{result.LatestVersion}";
 
-                if (!string.IsNullOrWhiteSpace(result.AssetUrl) && result.LatestVersion is { } latest)
-                {
-                    UpdateStatusText = L($"Downloading v{latest}...", $"Скачиваю v{latest}...");
-                    try
-                    {
-                        if (await UpdateInstaller.DownloadAndScheduleAsync(result.AssetUrl, latest, disposeTokenSource.Token))
-                        {
-                            UpdateStatusText = L("Installing, the widget restarts...", "Устанавливаю, виджет перезапустится...");
-                            PersistSettings();
-                            Microsoft.UI.Xaml.Application.Current.Exit();
-                            return;
-                        }
+                availableUpdateVersion = result.LatestVersion is { } ver ? $"v{ver}" : string.Empty;
+                availableUpdateAssetUrl = result.AssetUrl ?? string.Empty;
+                isUpdateNotificationAvailable = true;
+                isUpdateNotificationDismissed = false;
+                OnPropertyChanged(nameof(AvailableUpdateVersion));
+                OnPropertyChanged(nameof(ShouldShowUpdateNotification));
 
-                        UpdateStatusText = L("The release package is invalid.", "Пакет релиза повреждён.");
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        DebugTrace.Write($"Update: install failed {ex}");
-                        UpdateStatusText = UseRussianUi
-                            ? $"Не удалось установить обновление: {ex.Message}"
-                            : $"Unable to install the update: {ex.Message}";
-                    }
+                if (autoInstall && !string.IsNullOrWhiteSpace(result.AssetUrl) && result.LatestVersion is { } latest)
+                {
+                    await InstallAssetAndRestartAsync(result.AssetUrl, latest);
+                    return;
                 }
             }
         }
@@ -1626,6 +1665,63 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         finally
         {
             IsUpdateCheckInProgress = false;
+        }
+    }
+
+    public void DismissUpdateNotification()
+    {
+        if (isUpdateNotificationDismissed)
+        {
+            return;
+        }
+
+        isUpdateNotificationDismissed = true;
+        OnPropertyChanged(nameof(ShouldShowUpdateNotification));
+    }
+
+    public async Task TriggerUpdateFromNotificationAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(availableUpdateAssetUrl) &&
+            Version.TryParse(availableUpdateVersion.TrimStart('v', 'V'), out var latest))
+        {
+            await InstallAssetAndRestartAsync(availableUpdateAssetUrl, latest);
+            return;
+        }
+
+        if (CanOpenUpdateReleasePage())
+        {
+            OpenUpdateReleasePage();
+            return;
+        }
+
+        await CheckForUpdatesCoreAsync(autoInstall: true);
+    }
+
+    private async Task InstallAssetAndRestartAsync(string assetUrl, Version latest)
+    {
+        UpdateStatusText = L($"Downloading v{latest}...", $"Скачиваю v{latest}...");
+        try
+        {
+            if (await UpdateInstaller.DownloadAndScheduleAsync(assetUrl, latest, disposeTokenSource.Token))
+            {
+                UpdateStatusText = L("Installing, the widget restarts...", "Устанавливаю, виджет перезапустится...");
+                PersistSettings();
+                Microsoft.UI.Xaml.Application.Current.Exit();
+                return;
+            }
+
+            UpdateStatusText = L("The release package is invalid.", "Пакет релиза повреждён.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            DebugTrace.Write($"Update: install failed {ex}");
+            UpdateStatusText = UseRussianUi
+                ? $"Не удалось установить обновление: {ex.Message}"
+                : $"Unable to install the update: {ex.Message}";
         }
     }
 
@@ -1787,7 +1883,7 @@ public partial class MainViewModel : BaseViewModel, IDisposable
             }
         }
 
-        await CheckForUpdatesAsync();
+        await CheckForUpdatesCoreAsync(autoInstall: false);
     }
 
     private string LocalizeUpdateStatus(UpdateCheckResult result)
@@ -2208,6 +2304,29 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         LineAnimationVersion++;
     }
 
+    private void ClearLyricsForLoading()
+    {
+        lineTimer.Stop();
+        ClearPendingLineAdvance();
+        timeline.Clear();
+        isSyncedTimeline = false;
+        HasLyricsContent = false;
+        IsOutroActive = false;
+        lineIndex = 0;
+        unsyncedTrackPollCounter = 0;
+        OnPropertyChanged(nameof(TimelineLines));
+        OnPropertyChanged(nameof(HasSyncedTimeline));
+        OnPropertyChanged(nameof(ActiveLineIndex));
+        ClearPreRollState();
+        ShowLyricVisualizer = false;
+        IsLyricsSynced = false;
+        PreviousLine = string.Empty;
+        CurrentLine = string.Empty;
+        NextLine = string.Empty;
+        CurrentLineTiming = "--:--";
+        NextLineTiming = "--:--";
+    }
+
     private void ActivateVisualizerMode()
     {
         lineTimer.Stop();
@@ -2407,23 +2526,142 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
     private void UpdateArtworkTheme(string? artworkPath)
     {
+        Color nextDominant;
         if (TryExtractDominantArtworkColor(artworkPath, out var dominantColor))
         {
             hasArtworkTheme = true;
-            artworkDominantColor = dominantColor;
+            nextDominant = dominantColor;
         }
         else
         {
             hasArtworkTheme = false;
-            artworkDominantColor = Color.FromArgb(255, 121, 183, 244);
+            nextDominant = Color.FromArgb(255, 121, 183, 244);
         }
 
+        targetArtworkDominantColor = nextDominant;
         BuildOscilloscopeAccentPalette(
-            artworkDominantColor,
-            out artworkLowAccentColor,
-            out artworkMidAccentColor,
-            out artworkHighAccentColor);
+            nextDominant,
+            out targetLowAccentColor,
+            out targetMidAccentColor,
+            out targetHighAccentColor);
 
+        StartPaletteTransition(animate: !suppressSettingsPropertyHandlers);
+    }
+
+    private void StartPaletteTransition(bool animate)
+    {
+        var savedDominant = artworkDominantColor;
+        var savedLow = artworkLowAccentColor;
+        var savedMid = artworkMidAccentColor;
+        var savedHigh = artworkHighAccentColor;
+
+        artworkDominantColor = targetArtworkDominantColor;
+        artworkLowAccentColor = targetLowAccentColor;
+        artworkMidAccentColor = targetMidAccentColor;
+        artworkHighAccentColor = targetHighAccentColor;
+
+        var targetPalette = GetPalette();
+        targetTrackTitleColor = targetPalette.PrimaryText;
+        targetArtistColor = targetPalette.SecondaryText;
+        targetCurrentLineColor = UseDarkText ? Color.FromArgb(255, 14, 16, 22) : Color.FromArgb(255, 255, 255, 255);
+        targetPreviousLineColor = targetPalette.SecondaryText;
+        targetNextLineColor = targetPalette.MutedText;
+        targetTimingColor = targetPalette.TimingText;
+        targetShadowColor = GetShadowColor();
+
+        if (!animate ||
+            trackTitleBrushCache is null ||
+            artistBrushCache is null ||
+            currentLineBrushCache is null ||
+            previousLineBrushCache is null ||
+            nextLineBrushCache is null ||
+            timingBrushCache is null ||
+            textShadowBrushCache is null)
+        {
+            isPaletteTransitionActive = false;
+            paletteTransitionTimer.Stop();
+            ApplyPaletteColorsImmediate();
+            return;
+        }
+
+        fromArtworkDominantColor = savedDominant;
+        fromLowAccentColor = savedLow;
+        fromMidAccentColor = savedMid;
+        fromHighAccentColor = savedHigh;
+
+        fromTrackTitleColor = trackTitleBrushCache.Color;
+        fromArtistColor = artistBrushCache.Color;
+        fromCurrentLineColor = currentLineBrushCache.Color;
+        fromPreviousLineColor = previousLineBrushCache.Color;
+        fromNextLineColor = nextLineBrushCache.Color;
+        fromTimingColor = timingBrushCache.Color;
+        fromShadowColor = textShadowBrushCache.Color;
+
+        artworkDominantColor = savedDominant;
+        artworkLowAccentColor = savedLow;
+        artworkMidAccentColor = savedMid;
+        artworkHighAccentColor = savedHigh;
+
+        paletteTransitionStartTimestamp = Stopwatch.GetTimestamp();
+        isPaletteTransitionActive = true;
+        if (!paletteTransitionTimer.IsRunning)
+        {
+            paletteTransitionTimer.Start();
+        }
+    }
+
+    private void OnPaletteTransitionTimerTick(DispatcherQueueTimer sender, object args)
+    {
+        if (isDisposed || !isPaletteTransitionActive)
+        {
+            paletteTransitionTimer.Stop();
+            return;
+        }
+
+        var elapsed = Stopwatch.GetElapsedTime(paletteTransitionStartTimestamp).TotalSeconds;
+        var progress = Math.Clamp(elapsed / 0.55, 0, 1);
+        var eased = 1.0 - Math.Pow(1.0 - progress, 3);
+
+        artworkDominantColor = LerpColorValue(fromArtworkDominantColor, targetArtworkDominantColor, eased);
+        artworkLowAccentColor = LerpColorValue(fromLowAccentColor, targetLowAccentColor, eased);
+        artworkMidAccentColor = LerpColorValue(fromMidAccentColor, targetMidAccentColor, eased);
+        artworkHighAccentColor = LerpColorValue(fromHighAccentColor, targetHighAccentColor, eased);
+
+        if (trackTitleBrushCache is not null) trackTitleBrushCache.Color = LerpColorValue(fromTrackTitleColor, targetTrackTitleColor, eased);
+        if (artistBrushCache is not null) artistBrushCache.Color = LerpColorValue(fromArtistColor, targetArtistColor, eased);
+        if (currentLineBrushCache is not null) currentLineBrushCache.Color = LerpColorValue(fromCurrentLineColor, targetCurrentLineColor, eased);
+        if (previousLineBrushCache is not null) previousLineBrushCache.Color = LerpColorValue(fromPreviousLineColor, targetPreviousLineColor, eased);
+        if (nextLineBrushCache is not null) nextLineBrushCache.Color = LerpColorValue(fromNextLineColor, targetNextLineColor, eased);
+        if (timingBrushCache is not null) timingBrushCache.Color = LerpColorValue(fromTimingColor, targetTimingColor, eased);
+        if (textShadowBrushCache is not null) textShadowBrushCache.Color = LerpColorValue(fromShadowColor, targetShadowColor, eased);
+
+        if (progress >= 1)
+        {
+            isPaletteTransitionActive = false;
+            paletteTransitionTimer.Stop();
+            ApplyPaletteColorsImmediate();
+            return;
+        }
+
+        PaletteColorsTicked?.Invoke();
+    }
+
+    private void ApplyPaletteColorsImmediate()
+    {
+        artworkDominantColor = targetArtworkDominantColor;
+        artworkLowAccentColor = targetLowAccentColor;
+        artworkMidAccentColor = targetMidAccentColor;
+        artworkHighAccentColor = targetHighAccentColor;
+
+        if (trackTitleBrushCache is not null) trackTitleBrushCache.Color = targetTrackTitleColor;
+        if (artistBrushCache is not null) artistBrushCache.Color = targetArtistColor;
+        if (currentLineBrushCache is not null) currentLineBrushCache.Color = targetCurrentLineColor;
+        if (previousLineBrushCache is not null) previousLineBrushCache.Color = targetPreviousLineColor;
+        if (nextLineBrushCache is not null) nextLineBrushCache.Color = targetNextLineColor;
+        if (timingBrushCache is not null) timingBrushCache.Color = targetTimingColor;
+        if (textShadowBrushCache is not null) textShadowBrushCache.Color = targetShadowColor;
+
+        OnPropertyChanged(nameof(UseDarkText));
         OnPropertyChanged(nameof(OscilloscopeLowAccentColor));
         OnPropertyChanged(nameof(OscilloscopeMidAccentColor));
         OnPropertyChanged(nameof(OscilloscopeHighAccentColor));
@@ -2434,6 +2672,18 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         OnPropertyChanged(nameof(PreviousLineBrush));
         OnPropertyChanged(nameof(NextLineBrush));
         OnPropertyChanged(nameof(TimingBrush));
+        OnPropertyChanged(nameof(TextShadowBrush));
+        PaletteColorsTicked?.Invoke();
+    }
+
+    private static Color LerpColorValue(Color from, Color to, double t)
+    {
+        var clamped = Math.Clamp(t, 0, 1);
+        return Color.FromArgb(
+            (byte)Math.Round(from.A + ((to.A - from.A) * clamped)),
+            (byte)Math.Round(from.R + ((to.R - from.R) * clamped)),
+            (byte)Math.Round(from.G + ((to.G - from.G) * clamped)),
+            (byte)Math.Round(from.B + ((to.B - from.B) * clamped)));
     }
 
     private static bool TryExtractDominantArtworkColor(string? artworkPath, out Color dominantColor)
@@ -2697,6 +2947,13 @@ public partial class MainViewModel : BaseViewModel, IDisposable
         playbackTimer.Stop();
         playbackTimer.Tick -= OnPlaybackTimerTick;
 
+        autoSaveTimer.Stop();
+        autoSaveTimer.Tick -= OnAutoSaveTimerTick;
+        FlushPendingSettingsSave();
+
+        paletteTransitionTimer.Stop();
+        paletteTransitionTimer.Tick -= OnPaletteTransitionTimerTick;
+
         if (updateTimer is not null)
         {
             updateTimer.Stop();
@@ -2940,11 +3197,29 @@ public partial class MainViewModel : BaseViewModel, IDisposable
 
     private void PersistSettingsIfReady()
     {
-        if (suppressSettingsPropertyHandlers)
+        if (suppressSettingsPropertyHandlers || isDisposed)
         {
             return;
         }
 
+        hasPendingSettingsSave = true;
+        autoSaveTimer.Stop();
+        autoSaveTimer.Start();
+    }
+
+    private void OnAutoSaveTimerTick(DispatcherQueueTimer sender, object args)
+    {
+        FlushPendingSettingsSave();
+    }
+
+    public void FlushPendingSettingsSave()
+    {
+        if (!hasPendingSettingsSave || suppressSettingsPropertyHandlers)
+        {
+            return;
+        }
+
+        hasPendingSettingsSave = false;
         PersistSettings();
     }
 

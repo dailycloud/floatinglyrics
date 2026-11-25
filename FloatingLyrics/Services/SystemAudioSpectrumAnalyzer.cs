@@ -8,6 +8,7 @@ namespace FloatingLyrics.Services;
 public sealed class SystemAudioSpectrumAnalyzer : IDisposable
 {
     private const int FftLength = 2048;
+    private const int FftHopLength = 512;
     private const int FftExponent = 11; // log2(2048)
     private const float SilenceFloor = 1.0e-7f;
     private static readonly TimeSpan RoutingRefreshInterval = TimeSpan.FromSeconds(1.25);
@@ -21,7 +22,8 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
 
     private readonly object gate = new();
     private readonly object routeGate = new();
-    private readonly Complex[] fftFrame = new Complex[FftLength];
+    private readonly object lifecycleGate = new();
+    private readonly float[] ringSamples = new float[FftLength];
     private readonly Complex[] fftWorking = new Complex[FftLength];
     private readonly float[] window = CreateHannWindow(FftLength);
     private readonly float[] latestMagnitudes = new float[FftLength / 2];
@@ -29,10 +31,12 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
     private readonly object spectrumReadGate = new();
     private readonly List<(AudioSessionControl Session, AudioMeterInformation Meter)> cachedTargetSessions = [];
 
-    private WasapiLoopbackCapture? capture;
+    private LowLatencyLoopbackCapture? capture;
+    private MMDevice? captureDevice;
     private MMDeviceEnumerator? sessionEnumerator;
     private MMDevice? renderDevice;
     private int fftIndex;
+    private int hopCounter;
     private int sampleRate = 48000;
     private bool hasSpectrum;
     private bool isDisposed;
@@ -62,78 +66,99 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
 
     public void Start()
     {
-        if (isDisposed || capture is not null)
+        lock (lifecycleGate)
         {
-            return;
-        }
-
-        var loopback = new WasapiLoopbackCapture();
-        try
-        {
-            sampleRate = loopback.WaveFormat.SampleRate;
-            loopback.DataAvailable += OnDataAvailable;
-            capture = loopback;
-            loopback.StartRecording();
-
-            lock (routeGate)
+            if (isDisposed || capture is not null)
             {
-                RefreshPreferredRoutingLocked(force: true);
+                return;
             }
-        }
-        catch
-        {
-            capture = null;
-            loopback.DataAvailable -= OnDataAvailable;
+
+            var device = WasapiLoopbackCapture.GetDefaultLoopbackCaptureDevice();
+            LowLatencyLoopbackCapture? loopback = null;
             try
             {
-                loopback.StopRecording();
+                loopback = new LowLatencyLoopbackCapture(device, 16);
+                sampleRate = loopback.WaveFormat.SampleRate;
+                loopback.DataAvailable += OnDataAvailable;
+                captureDevice = device;
+                capture = loopback;
+                loopback.StartRecording();
+
+                lock (routeGate)
+                {
+                    RefreshPreferredRoutingLocked(force: true);
+                }
             }
             catch
             {
-            }
+                capture = null;
+                captureDevice = null;
+                if (loopback is not null)
+                {
+                    loopback.DataAvailable -= OnDataAvailable;
+                    try
+                    {
+                        loopback.StopRecording();
+                    }
+                    catch
+                    {
+                    }
 
-            loopback.Dispose();
-            lock (routeGate)
-            {
-                DisposeSessionEndpointLocked();
-                captureRouteDescription = "system-loopback";
-            }
+                    loopback.Dispose();
+                }
 
-            throw;
+                device.Dispose();
+                lock (routeGate)
+                {
+                    DisposeSessionEndpointLocked();
+                    captureRouteDescription = "system-loopback";
+                }
+
+                throw;
+            }
         }
     }
 
     public void Stop()
     {
-        var loopback = capture;
-        capture = null;
-        if (loopback is not null)
+        lock (lifecycleGate)
         {
-            loopback.DataAvailable -= OnDataAvailable;
-            try
+            var loopback = capture;
+            var device = captureDevice;
+            capture = null;
+            captureDevice = null;
+            if (loopback is not null)
             {
-                loopback.StopRecording();
+                loopback.DataAvailable -= OnDataAvailable;
+                try
+                {
+                    loopback.StopRecording();
+                }
+                catch
+                {
+                }
+
+                loopback.Dispose();
             }
-            catch
+
+            device?.Dispose();
+
+            lock (gate)
             {
+                Array.Fill(latestMagnitudes, 0f);
+                hasSpectrum = false;
+                fftIndex = 0;
+                hopCounter = 0;
+                Array.Clear(ringSamples);
             }
 
-            loopback.Dispose();
-        }
-
-        lock (gate)
-        {
-            Array.Fill(latestMagnitudes, 0f);
-            hasSpectrum = false;
-            fftIndex = 0;
-        }
-
-        lock (routeGate)
-        {
-            appScopedGate = 1f;
-            appScopedGateInitialized = false;
-            DisposeSessionEndpointLocked();
-            captureRouteDescription = "system-loopback";
+            lock (routeGate)
+            {
+                appScopedGate = 1f;
+                appScopedGateInitialized = false;
+                DisposeSessionEndpointLocked();
+                captureRouteDescription = "system-loopback";
+            }
         }
     }
 
@@ -607,18 +632,24 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
 
     private void AppendSample(float sample)
     {
-        var index = fftIndex;
-        fftFrame[index].X = sample * window[index];
-        fftFrame[index].Y = 0;
-        index++;
-        if (index < FftLength)
+        var writeIndex = fftIndex;
+        ringSamples[writeIndex] = sample;
+        fftIndex = (writeIndex + 1) & (FftLength - 1);
+        hopCounter++;
+        if (hopCounter < FftHopLength)
         {
-            fftIndex = index;
             return;
         }
 
-        fftIndex = 0;
-        Array.Copy(fftFrame, fftWorking, FftLength);
+        hopCounter = 0;
+        var readIndex = fftIndex;
+        for (var i = 0; i < FftLength; i++)
+        {
+            fftWorking[i].X = ringSamples[readIndex] * window[i];
+            fftWorking[i].Y = 0;
+            readIndex = (readIndex + 1) & (FftLength - 1);
+        }
+
         FastFourierTransform.FFT(true, FftExponent, fftWorking);
 
         lock (gate)
@@ -629,7 +660,7 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
                 var imag = fftWorking[i].Y;
                 var magnitude = MathF.Sqrt((real * real) + (imag * imag));
                 var normalized = NormalizeMagnitude(magnitude);
-                latestMagnitudes[i] = (latestMagnitudes[i] * 0.62f) + (normalized * 0.38f);
+                latestMagnitudes[i] = (latestMagnitudes[i] * 0.45f) + (normalized * 0.55f);
             }
 
             hasSpectrum = true;
@@ -789,5 +820,12 @@ public sealed class SystemAudioSpectrumAnalyzer : IDisposable
     {
         isDisposed = true;
         Stop();
+    }
+
+    private sealed class LowLatencyLoopbackCapture(MMDevice device, int bufferMilliseconds)
+        : WasapiCapture(device, false, bufferMilliseconds)
+    {
+        protected override AudioClientStreamFlags GetAudioClientStreamFlags() =>
+            AudioClientStreamFlags.Loopback | base.GetAudioClientStreamFlags();
     }
 }

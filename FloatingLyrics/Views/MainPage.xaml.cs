@@ -63,8 +63,8 @@ public sealed partial class MainPage : Page
     private const double CenterModeVisualizerMinWidth = 360;
     private const double CenterModeVisualizerMaxWidthRatio = 0.78;
     private const double CenterModeVisualizerDragScale = 1.9;
-    private const double DragSnapGridStep = 32;
-    private const double DragSnapAxisThreshold = 10;
+    private const double DragSnapEdgeMargin = 28;
+    private const double DragSnapMagneticThreshold = 10;
     private const int VkShift = 0x10;
     private static readonly Duration OverlayGeometryAnimationDuration = new(TimeSpan.FromMilliseconds(260));
     private const double WaitingDotsTopMargin = 10;
@@ -77,10 +77,20 @@ public sealed partial class MainPage : Page
     private bool isDraggingWindow;
     private bool isWindowClickThroughEnabled;
     private bool isPageUnloaded;
+    private bool hasPendingStartupOffset;
+    private bool hasPendingDragOffset;
+    private Point pendingDragOffset;
     private uint draggingPointerId;
     private Point dragStartOverlayOffset;
     private Point dragStartPointerPositionInRoot;
-    private DragAxisLockMode dragAxisLockMode;
+    private Line? snapGuideCenterX;
+    private Line? snapGuideCenterY;
+    private Line? snapGuideLeft;
+    private Line? snapGuideRight;
+    private Line? snapGuideTop;
+    private Line? snapGuideBottom;
+    private readonly SolidColorBrush snapGuideIdleBrush = new(Color.FromArgb(46, 255, 255, 255));
+    private readonly SolidColorBrush snapGuideActiveBrush = new(Color.FromArgb(215, 168, 224, 255));
     private nint hwnd;
     private DispatcherQueueTimer? clickThroughTimer;
     private DispatcherQueueTimer? debugOverlayTimer;
@@ -134,8 +144,10 @@ public sealed partial class MainPage : Page
     private Color paletteCurrentColor = Color.FromArgb(255, 255, 255, 255);
     private Color paletteNextColor = Color.FromArgb(255, 213, 213, 213);
     private Color paletteShadowColor = Color.FromArgb(160, 0, 0, 0);
-    private DispatcherQueueTimer? visualizerTimer;
+    private bool isVisualizerLoopActive;
+    private TimeSpan lastVisualizerFrameTime;
     private readonly List<PhysicalLyricItem> physicalLyricItems = [];
+    private string activePhysicalTrackMetaKey = string.Empty;
     private Storyboard? activePhysicalTrackStoryboard;
     private int physicalRenderedIndex = -1;
     private double physicalLineStep;
@@ -248,7 +260,11 @@ public sealed partial class MainPage : Page
     {
         isPageUnloaded = false;
         DebugTrace.Write("MainPage: loaded start");
-        RunLoadedStep("bind-viewmodel", () => ViewModel.PropertyChanged += OnViewModelPropertyChanged);
+        RunLoadedStep("bind-viewmodel", () =>
+        {
+            ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+            ViewModel.PaletteColorsTicked += OnViewModelPaletteColorsTicked;
+        });
         RunLoadedStep("resolve-window", () =>
         {
             appWindow = ResolveAppWindow();
@@ -292,6 +308,20 @@ public sealed partial class MainPage : Page
             startupWindowStateApplied = true;
         });
         RunLoadedStep("apply-overlay-offset", ApplyOverlayRootOffsetFromViewModel);
+        DispatcherQueue?.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (isPageUnloaded)
+            {
+                return;
+            }
+
+            InvalidateOverlayGeometryCache();
+            centerTextWidthKey = string.Empty;
+            UpdateOverlayGeometry(forceTrackRecompute: true);
+            UpdateLyricsHorizontalAlignment(animateGeometry: false, forceGeometryRecompute: true);
+            ApplyOverlayRootOffsetFromViewModel();
+            EnsureGlassRenderLoop();
+        });
         DebugTrace.Write("MainPage: loaded done");
     }
 
@@ -427,13 +457,14 @@ public sealed partial class MainPage : Page
     {
         isPageUnloaded = true;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        ViewModel.PaletteColorsTicked -= OnViewModelPaletteColorsTicked;
+        ViewModel.FlushPendingSettingsSave();
         startupWindowStateApplied = false;
         TeardownGlass();
         StopLyricsLoop();
         StopWordTicker();
         TeardownLyricsTextOverlay();
         ReleaseTitleHalos();
-        ViewModel.SetOverlayResizeDeferred(false);
         StopActiveLineTransition();
         isLineTransitionRunning = false;
         hasPendingLineTransition = false;
@@ -445,7 +476,9 @@ public sealed partial class MainPage : Page
         StopWaitingDotsAnimation();
         StopActivePhysicalTrackTransition();
         StopPhysicalTrackFadeTimer();
+        DisposeOutgoingLyricItems();
         DisposePhysicalLyricItems();
+        activePhysicalTrackMetaKey = string.Empty;
         LyricsTrackSurface.Children.Clear();
         LyricsCanvas.Clip = null;
         DragSnapGridCanvas.Children.Clear();
@@ -477,12 +510,6 @@ public sealed partial class MainPage : Page
         {
             physicalTrackFadeTimer.Tick -= OnPhysicalTrackFadeTimerTick;
             physicalTrackFadeTimer = null;
-        }
-
-        if (visualizerTimer is not null)
-        {
-            visualizerTimer.Tick -= OnVisualizerTimerTick;
-            visualizerTimer = null;
         }
 
         audioSpectrumAnalyzer.Dispose();
@@ -622,24 +649,7 @@ public sealed partial class MainPage : Page
             nameof(MainViewModel.NextLineBrush) or
             nameof(MainViewModel.TextShadowBrush))
         {
-            EnqueueIfLoaded(() =>
-            {
-                ApplyLineBrushPalette();
-                if (ShouldUsePhysicalTrack())
-                {
-                    if (isLyricsLoopActive)
-                    {
-                        foreach (var item in physicalLyricItems)
-                        {
-                            ApplyPhysicalItemVisual(item);
-                        }
-                    }
-                    else
-                    {
-                        ApplyPhysicalTrackFinalState(GetActivePhysicalPlanIndex());
-                    }
-                }
-            });
+            EnqueueIfLoaded(RefreshPaletteVisuals);
             return;
         }
 
@@ -765,10 +775,20 @@ public sealed partial class MainPage : Page
 
     private void RootGrid_OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        UpdateOverlayGeometry();
-        var snapped = SnapOverlayRootOffsetToGrid(new Point(OverlayRootHostTranslate.X, OverlayRootHostTranslate.Y));
-        var clamped = ClampOverlayRootOffset(snapped);
-        ApplyOverlayRootOffset(clamped, persist: false);
+        InvalidateOverlayGeometryCache();
+        centerTextWidthKey = string.Empty;
+        UpdateOverlayGeometry(forceTrackRecompute: true);
+        UpdateLyricsHorizontalAlignment(animateGeometry: false, forceGeometryRecompute: true);
+        if (hasPendingStartupOffset)
+        {
+            ApplyOverlayRootOffsetFromViewModel();
+        }
+        else
+        {
+            var clamped = ClampOverlayRootOffset(new Point(OverlayRootHostTranslate.X, OverlayRootHostTranslate.Y));
+            ApplyOverlayRootOffset(clamped, persist: false);
+        }
+
         if (DragSnapOverlay.Visibility == Visibility.Visible)
         {
             RebuildDragSnapGridOverlay();
@@ -777,20 +797,36 @@ public sealed partial class MainPage : Page
 
     private void OverlayRootHost_OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        // Avoid cumulative X drift when width changes repeatedly (for example while
-        // toggling text alignment Left/Center/Right). We do not compensate by delta
-        // width here; we only keep the current offset inside safe bounds.
-        var snapped = SnapOverlayRootOffsetToGrid(new Point(OverlayRootHostTranslate.X, OverlayRootHostTranslate.Y));
-        var clamped = ClampOverlayRootOffset(snapped);
+        if (e.NewSize.Width > 32)
+        {
+            InvalidateOverlayGeometryCache();
+            centerTextWidthKey = string.Empty;
+            UpdateLyricsHorizontalAlignment(animateGeometry: false, forceGeometryRecompute: true);
+            EnsureGlassRenderLoop();
+        }
+
+        if (hasPendingStartupOffset)
+        {
+            ApplyOverlayRootOffsetFromViewModel();
+            return;
+        }
+
+        var clamped = ClampOverlayRootOffset(new Point(OverlayRootHostTranslate.X, OverlayRootHostTranslate.Y));
         ApplyOverlayRootOffset(clamped, persist: false);
     }
 
     private void ApplyOverlayRootOffsetFromViewModel()
     {
-        var snapped = SnapOverlayRootOffsetToGrid(new Point(
+        if (RootGrid.ActualWidth <= 32 || OverlayRootHost.ActualWidth <= 32)
+        {
+            hasPendingStartupOffset = true;
+            return;
+        }
+
+        hasPendingStartupOffset = false;
+        var clamped = ClampOverlayRootOffset(new Point(
             ViewModel.OverlayContentOffsetX,
             ViewModel.OverlayContentOffsetY));
-        var clamped = ClampOverlayRootOffset(snapped);
         ApplyOverlayRootOffset(clamped, persist: false);
     }
 
@@ -838,13 +874,84 @@ public sealed partial class MainPage : Page
             Math.Clamp(raw.Y, minY, maxY));
     }
 
-    private Point SnapOverlayRootOffsetToGrid(Point raw)
+    private Point SnapOverlayRootOffsetToGuides(
+        Point raw,
+        out string? activeXGuide,
+        out string? activeYGuide)
     {
-        var step = Math.Max(1, DragSnapGridStep);
+        activeXGuide = null;
+        activeYGuide = null;
+
+        var width = RootGrid.ActualWidth;
+        var height = RootGrid.ActualHeight;
+        if (!double.IsFinite(width) || !double.IsFinite(height) || width <= 1 || height <= 1)
+        {
+            return raw;
+        }
+
         var margin = OverlayRootHost.Margin;
-        var snappedX = (Math.Round((raw.X + margin.Left) / step) * step) - margin.Left;
-        var snappedY = (Math.Round((raw.Y + margin.Top) / step) * step) - margin.Top;
-        return new Point(snappedX, snappedY);
+        var plate = CurrentPlateRect();
+        var plateWidth = plate.Width > 1 ? plate.Width : OverlayRootHost.ActualWidth;
+        var plateHeight = plate.Height > 1 ? plate.Height : OverlayRootHost.ActualHeight;
+
+        var plateLeft = margin.Left + raw.X + plate.X;
+        var plateTop = margin.Top + raw.Y + plate.Y;
+        var plateCenterX = plateLeft + (plateWidth * 0.5);
+        var plateCenterY = plateTop + (plateHeight * 0.5);
+        var plateRight = plateLeft + plateWidth;
+        var plateBottom = plateTop + plateHeight;
+
+        var x = raw.X;
+        var bestDx = DragSnapMagneticThreshold;
+        var distCenterX = (width * 0.5) - plateCenterX;
+        if (Math.Abs(distCenterX) <= bestDx)
+        {
+            bestDx = Math.Abs(distCenterX);
+            x = raw.X + distCenterX;
+            activeXGuide = "centerX";
+        }
+
+        var distLeft = DragSnapEdgeMargin - plateLeft;
+        if (Math.Abs(distLeft) < bestDx)
+        {
+            bestDx = Math.Abs(distLeft);
+            x = raw.X + distLeft;
+            activeXGuide = "left";
+        }
+
+        var distRight = (width - DragSnapEdgeMargin) - plateRight;
+        if (Math.Abs(distRight) < bestDx)
+        {
+            x = raw.X + distRight;
+            activeXGuide = "right";
+        }
+
+        var y = raw.Y;
+        var bestDy = DragSnapMagneticThreshold;
+        var distCenterY = (height * 0.5) - plateCenterY;
+        if (Math.Abs(distCenterY) <= bestDy)
+        {
+            bestDy = Math.Abs(distCenterY);
+            y = raw.Y + distCenterY;
+            activeYGuide = "centerY";
+        }
+
+        var distTop = DragSnapEdgeMargin - plateTop;
+        if (Math.Abs(distTop) < bestDy)
+        {
+            bestDy = Math.Abs(distTop);
+            y = raw.Y + distTop;
+            activeYGuide = "top";
+        }
+
+        var distBottom = (height - DragSnapEdgeMargin) - plateBottom;
+        if (Math.Abs(distBottom) < bestDy)
+        {
+            y = raw.Y + distBottom;
+            activeYGuide = "bottom";
+        }
+
+        return new Point(x, y);
     }
 
     private void UpdateLyricsHorizontalAlignment(bool animateGeometry = false, bool forceGeometryRecompute = false)
@@ -1663,7 +1770,6 @@ public sealed partial class MainPage : Page
         dragStartPointerPositionInRoot = e.GetCurrentPoint(RootGrid).Position;
         dragPressPointInRoot = dragStartPointerPositionInRoot;
         dragStartOverlayOffset = new Point(OverlayRootHostTranslate.X, OverlayRootHostTranslate.Y);
-        dragAxisLockMode = DragAxisLockMode.None;
         draggingPointerId = e.Pointer.PointerId;
         isDragPending = OverlayRootHost.CapturePointer(e.Pointer);
         e.Handled = true;
@@ -1738,7 +1844,7 @@ public sealed partial class MainPage : Page
             {
                 isDraggingWindow = true;
                 ShowDragSnapOverlay();
-                UpdateDragSnapHint(DragAxisLockMode.None, isBypassed: false);
+                UpdateDragSnapHint(null, null, isBypassed: false);
                 EnsureGlassRenderLoop();
             }
         }
@@ -1761,46 +1867,32 @@ public sealed partial class MainPage : Page
         var deltaY = currentPointInRoot.Y - dragStartPointerPositionInRoot.Y;
         var bypassSnap = IsDragSnapBypassModifierPressed();
 
-        if (!bypassSnap && dragAxisLockMode == DragAxisLockMode.None)
-        {
-            var absX = Math.Abs(deltaX);
-            var absY = Math.Abs(deltaY);
-            if (absX >= DragSnapAxisThreshold || absY >= DragSnapAxisThreshold)
-            {
-                dragAxisLockMode = absX >= absY
-                    ? DragAxisLockMode.Horizontal
-                    : DragAxisLockMode.Vertical;
-            }
-        }
-
-        var effectiveAxis = bypassSnap ? DragAxisLockMode.None : dragAxisLockMode;
-        if (effectiveAxis == DragAxisLockMode.Horizontal)
-        {
-            deltaY = 0;
-        }
-        else if (effectiveAxis == DragAxisLockMode.Vertical)
-        {
-            deltaX = 0;
-        }
-
-        if (!bypassSnap)
-        {
-            deltaX = Math.Round(deltaX / DragSnapGridStep) * DragSnapGridStep;
-            deltaY = Math.Round(deltaY / DragSnapGridStep) * DragSnapGridStep;
-        }
-
         var target = new Point(
             dragStartOverlayOffset.X + deltaX,
             dragStartOverlayOffset.Y + deltaY);
+        string? activeXGuide = null;
+        string? activeYGuide = null;
         if (!bypassSnap)
         {
-            target = SnapOverlayRootOffsetToGrid(target);
+            target = SnapOverlayRootOffsetToGuides(target, out activeXGuide, out activeYGuide);
         }
 
         target = ClampOverlayRootOffset(target);
-        ApplyOverlayRootOffset(target, persist: false);
-        UpdateDragSnapHint(effectiveAxis, bypassSnap);
-        RequestGlassFrame();
+        UpdateDragSnapGuidesVisual(activeXGuide, activeYGuide);
+        UpdateDragSnapHint(activeXGuide, activeYGuide, bypassSnap);
+        if (GlassPlate.Visibility == Visibility.Visible)
+        {
+            pendingDragOffset = target;
+            hasPendingDragOffset = true;
+            GlassPlate.Invalidate();
+            EnsureGlassRenderLoop();
+        }
+        else
+        {
+            hasPendingDragOffset = false;
+            ApplyOverlayRootOffset(target, persist: false);
+        }
+
         e.Handled = true;
     }
 
@@ -1823,15 +1915,19 @@ public sealed partial class MainPage : Page
     {
         if (isDraggingWindow)
         {
-            var target = SnapOverlayRootOffsetToGrid(new Point(
-                OverlayRootHostTranslate.X,
-                OverlayRootHostTranslate.Y));
-            ApplyOverlayRootOffset(ClampOverlayRootOffset(target), persist: true);
+            var current = hasPendingDragOffset
+                ? pendingDragOffset
+                : new Point(OverlayRootHostTranslate.X, OverlayRootHostTranslate.Y);
+            hasPendingDragOffset = false;
+            ApplyOverlayRootOffset(ClampOverlayRootOffset(current), persist: true);
+        }
+        else
+        {
+            hasPendingDragOffset = false;
         }
 
         isDraggingWindow = false;
         isDragPending = false;
-        dragAxisLockMode = DragAxisLockMode.None;
         draggingPointerId = 0;
         OverlayRootHost.ReleasePointerCaptures();
         HideDragSnapOverlay();
@@ -1847,6 +1943,12 @@ public sealed partial class MainPage : Page
     private void HideDragSnapOverlay()
     {
         DragSnapOverlay.Visibility = Visibility.Collapsed;
+        snapGuideCenterX = null;
+        snapGuideCenterY = null;
+        snapGuideLeft = null;
+        snapGuideRight = null;
+        snapGuideTop = null;
+        snapGuideBottom = null;
         DragSnapGridCanvas.Children.Clear();
     }
 
@@ -1863,82 +1965,97 @@ public sealed partial class MainPage : Page
         DragSnapGridCanvas.Height = height;
         DragSnapGridCanvas.Children.Clear();
 
-        var step = DragSnapGridStep;
-        var majorInterval = 4;
-        var minorBrush = new SolidColorBrush(Color.FromArgb(24, 255, 255, 255));
-        var majorBrush = new SolidColorBrush(Color.FromArgb(46, 255, 255, 255));
-        var centerBrush = new SolidColorBrush(Color.FromArgb(74, 196, 226, 255));
-
-        var index = 0;
-        for (var x = 0d; x <= width; x += step, index++)
-        {
-            var isMajor = index % majorInterval == 0;
-            var line = new Line
-            {
-                X1 = x,
-                X2 = x,
-                Y1 = 0,
-                Y2 = height,
-                StrokeThickness = isMajor ? 1.1 : 0.8,
-                Stroke = isMajor ? majorBrush : minorBrush,
-                IsHitTestVisible = false
-            };
-            DragSnapGridCanvas.Children.Add(line);
-        }
-
-        index = 0;
-        for (var y = 0d; y <= height; y += step, index++)
-        {
-            var isMajor = index % majorInterval == 0;
-            var line = new Line
-            {
-                X1 = 0,
-                X2 = width,
-                Y1 = y,
-                Y2 = y,
-                StrokeThickness = isMajor ? 1.1 : 0.8,
-                Stroke = isMajor ? majorBrush : minorBrush,
-                IsHitTestVisible = false
-            };
-            DragSnapGridCanvas.Children.Add(line);
-        }
-
         var centerX = width * 0.5;
         var centerY = height * 0.5;
-        DragSnapGridCanvas.Children.Add(new Line
-        {
-            X1 = centerX,
-            X2 = centerX,
-            Y1 = 0,
-            Y2 = height,
-            Stroke = centerBrush,
-            StrokeThickness = 1.4,
-            IsHitTestVisible = false
-        });
-        DragSnapGridCanvas.Children.Add(new Line
-        {
-            X1 = 0,
-            X2 = width,
-            Y1 = centerY,
-            Y2 = centerY,
-            Stroke = centerBrush,
-            StrokeThickness = 1.4,
-            IsHitTestVisible = false
-        });
+        var left = DragSnapEdgeMargin;
+        var right = Math.Max(left + 1, width - DragSnapEdgeMargin);
+        var top = DragSnapEdgeMargin;
+        var bottom = Math.Max(top + 1, height - DragSnapEdgeMargin);
+
+        snapGuideCenterX = CreateGuideLine(centerX, 0, centerX, height, 0.28);
+        snapGuideCenterY = CreateGuideLine(0, centerY, width, centerY, 0.28);
+        snapGuideLeft = CreateGuideLine(left, 0, left, height, 0);
+        snapGuideRight = CreateGuideLine(right, 0, right, height, 0);
+        snapGuideTop = CreateGuideLine(0, top, width, top, 0);
+        snapGuideBottom = CreateGuideLine(0, bottom, width, bottom, 0);
+
+        DragSnapGridCanvas.Children.Add(snapGuideLeft);
+        DragSnapGridCanvas.Children.Add(snapGuideRight);
+        DragSnapGridCanvas.Children.Add(snapGuideTop);
+        DragSnapGridCanvas.Children.Add(snapGuideBottom);
+        DragSnapGridCanvas.Children.Add(snapGuideCenterX);
+        DragSnapGridCanvas.Children.Add(snapGuideCenterY);
     }
 
-    private void UpdateDragSnapHint(DragAxisLockMode axisMode, bool isBypassed)
+    private Line CreateGuideLine(double x1, double y1, double x2, double y2, double opacity)
     {
-        var axisText = axisMode switch
+        return new Line
         {
-            DragAxisLockMode.Horizontal => "ось X",
-            DragAxisLockMode.Vertical => "ось Y",
-            _ => "ось авто"
+            X1 = x1,
+            Y1 = y1,
+            X2 = x2,
+            Y2 = y2,
+            Stroke = snapGuideIdleBrush,
+            StrokeThickness = 1.0,
+            Opacity = opacity,
+            IsHitTestVisible = false
         };
+    }
 
-        DragSnapHintText.Text = isBypassed
-            ? "Привязка: ВЫКЛ (Shift) • свободное движение"
-            : $"Привязка: ВКЛ ({DragSnapGridStep:0}px) • {axisText} • Shift — игнорировать";
+    private void UpdateDragSnapGuidesVisual(string? activeXGuide, string? activeYGuide)
+    {
+        SetGuideVisual(snapGuideCenterX, activeXGuide == "centerX", idleOpacity: 0.28);
+        SetGuideVisual(snapGuideLeft, activeXGuide == "left", idleOpacity: 0);
+        SetGuideVisual(snapGuideRight, activeXGuide == "right", idleOpacity: 0);
+        SetGuideVisual(snapGuideCenterY, activeYGuide == "centerY", idleOpacity: 0.28);
+        SetGuideVisual(snapGuideTop, activeYGuide == "top", idleOpacity: 0);
+        SetGuideVisual(snapGuideBottom, activeYGuide == "bottom", idleOpacity: 0);
+    }
+
+    private void SetGuideVisual(Line? line, bool active, double idleOpacity)
+    {
+        if (line is null)
+        {
+            return;
+        }
+
+        line.Stroke = active ? snapGuideActiveBrush : snapGuideIdleBrush;
+        line.StrokeThickness = active ? 1.5 : 1.0;
+        line.Opacity = active ? 0.92 : idleOpacity;
+    }
+
+    private void UpdateDragSnapHint(string? activeXGuide, string? activeYGuide, bool isBypassed)
+    {
+        if (isBypassed)
+        {
+            DragSnapHintText.Text = "Свободное движение (Shift)";
+            return;
+        }
+
+        if (activeXGuide is null && activeYGuide is null)
+        {
+            DragSnapHintText.Text = "Свободное движение • Shift — отключить магнит";
+            return;
+        }
+
+        var xLabel = activeXGuide switch
+        {
+            "centerX" => "центр X",
+            "left" => "левый край",
+            "right" => "правый край",
+            _ => null
+        };
+        var yLabel = activeYGuide switch
+        {
+            "centerY" => "центр Y",
+            "top" => "верхний край",
+            "bottom" => "нижний край",
+            _ => null
+        };
+        var joined = xLabel is not null && yLabel is not null
+            ? $"{xLabel} + {yLabel}"
+            : xLabel ?? yLabel;
+        DragSnapHintText.Text = $"Магнит: {joined} • Shift — свободно";
     }
 
     private static bool IsDragSnapBypassModifierPressed() =>
@@ -2784,6 +2901,30 @@ public sealed partial class MainPage : Page
         preRollInnerStoryboard = null;
     }
 
+    private void OnViewModelPaletteColorsTicked()
+    {
+        EnqueueIfLoaded(RefreshPaletteVisuals);
+    }
+
+    private void RefreshPaletteVisuals()
+    {
+        ApplyLineBrushPalette();
+        if (ShouldUsePhysicalTrack())
+        {
+            foreach (var item in outgoingLyricItems)
+            {
+                ApplyPhysicalItemVisual(item);
+            }
+
+            foreach (var item in physicalLyricItems)
+            {
+                ApplyPhysicalItemVisual(item);
+            }
+
+            InvalidateLyricsText();
+        }
+    }
+
     private void ApplyLineBrushPalette()
     {
         palettePreviousColor = GetBrushColor(ViewModel.PreviousLineBrush, palettePreviousColor);
@@ -2875,9 +3016,21 @@ public sealed partial class MainPage : Page
         StopActivePhysicalTrackTransition();
         activePhysicalTrackPlan = new PhysicalTrackPlan(Array.Empty<PhysicalTrackEntry>(), 0, 0, false);
         physicalTrackInitialized = false;
+        CaptureOutgoingLyricItems();
         physicalRenderedIndex = -1;
         DisposePhysicalLyricItems();
         LyricsTrackSurface.Children.Clear();
+        if (ViewModel.ShowLyricVisualizer || ViewModel.IsPreRollActive)
+        {
+            DisposeOutgoingLyricItems();
+        }
+        else
+        {
+            foreach (var outgoing in outgoingLyricItems)
+            {
+                LyricsTrackSurface.Children.Add(outgoing.Layer);
+            }
+        }
         spectrumView?.Release();
         spectrumView = null;
         physicalTrackVisualizerCanvas = null;
@@ -3163,11 +3316,25 @@ public sealed partial class MainPage : Page
 
         var previousPlan = activePhysicalTrackPlan;
         var previousRenderedIndex = physicalRenderedIndex;
+        var previousMetaKey = activePhysicalTrackMetaKey;
+        var nextMetaKey = $"{ViewModel.TrackTitle}\u001f{ViewModel.ArtistName}";
+        var isTrackChanged = !string.IsNullOrEmpty(previousMetaKey) &&
+            !string.Equals(previousMetaKey, nextMetaKey, StringComparison.Ordinal);
+
         StopActivePhysicalTrackTransition();
         spectrumView?.Release();
         spectrumView = null;
+        if (isTrackChanged)
+        {
+            CaptureOutgoingLyricItems();
+        }
         DisposePhysicalLyricItems();
+        activePhysicalTrackMetaKey = nextMetaKey;
         LyricsTrackSurface.Children.Clear();
+        foreach (var outgoing in outgoingLyricItems)
+        {
+            LyricsTrackSurface.Children.Add(outgoing.Layer);
+        }
         physicalTrackVisualizerCanvas = null;
         physicalOutroVisualizerCanvas = null;
         activeVisualizerCanvas = null;
@@ -3370,7 +3537,14 @@ public sealed partial class MainPage : Page
         var targetIndex = Math.Clamp(plan.ActiveIndex, 0, physicalLyricItems.Count - 1);
         if (physicalRenderedIndex < 0)
         {
-            StartPhysicalTrackIntroFromBottom(targetIndex);
+            if (outgoingLyricItems.Count > 0)
+            {
+                BeginPhysicalSpringTransitionFromOutgoing(targetIndex);
+            }
+            else
+            {
+                StartPhysicalTrackIntroFromBottom(targetIndex);
+            }
             return;
         }
 
@@ -4178,22 +4352,24 @@ public sealed partial class MainPage : Page
         try
         {
             EnsureVisualizerLines();
-            if (visualizerTimer is null)
-            {
-                var queue = DispatcherQueue.GetForCurrentThread();
-                if (queue is null)
-                {
-                    return;
-                }
-
-                visualizerTimer = queue.CreateTimer();
-                visualizerTimer.Interval = TimeSpan.FromMilliseconds(16);
-                visualizerTimer.IsRepeating = true;
-                visualizerTimer.Tick += OnVisualizerTimerTick;
-            }
             UpdateVisualizerCaptureSource();
-            audioSpectrumAnalyzer.Start();
-            visualizerTimer.Start();
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    audioSpectrumAnalyzer.Start();
+                }
+                catch (Exception ex)
+                {
+                    DebugTrace.Write($"UpdateVisualizerState start failed: {ex}");
+                }
+            });
+            if (!isVisualizerLoopActive)
+            {
+                isVisualizerLoopActive = true;
+                lastVisualizerFrameTime = TimeSpan.Zero;
+                CompositionTarget.Rendering += OnVisualizerRendering;
+            }
         }
         catch (Exception ex)
         {
@@ -4205,12 +4381,14 @@ public sealed partial class MainPage : Page
     private void StopVisualizerAnimation()
     {
         audioSpectrumAnalyzer.Stop();
-        if (visualizerTimer is null)
+        if (!isVisualizerLoopActive)
         {
             return;
         }
 
-        visualizerTimer.Stop();
+        isVisualizerLoopActive = false;
+        lastVisualizerFrameTime = TimeSpan.Zero;
+        CompositionTarget.Rendering -= OnVisualizerRendering;
     }
 
     private bool ShouldRenderPhysicalLeadVisualizer()
@@ -4270,8 +4448,14 @@ public sealed partial class MainPage : Page
         visualizerLinesDirty = true;
     }
 
-    private void OnVisualizerTimerTick(DispatcherQueueTimer sender, object args)
+    private void OnVisualizerRendering(object? sender, object e)
     {
+        if (isPageUnloaded)
+        {
+            StopVisualizerAnimation();
+            return;
+        }
+
         try
         {
             var shouldShowVisualizer =
@@ -4282,6 +4466,13 @@ public sealed partial class MainPage : Page
                 StopVisualizerAnimation();
                 return;
             }
+
+            var renderingTime = e is RenderingEventArgs args ? args.RenderingTime : TimeSpan.Zero;
+            var dt = lastVisualizerFrameTime == TimeSpan.Zero
+                ? 1.0 / 60.0
+                : Math.Clamp((renderingTime - lastVisualizerFrameTime).TotalSeconds, 1.0 / 240.0, 1.0 / 20.0);
+            lastVisualizerFrameTime = renderingTime;
+            var frameScale = (float)(dt * 60.0);
 
             EnsureVisualizerBuffers();
             EnsureVisualizerLines();
@@ -4319,6 +4510,9 @@ public sealed partial class MainPage : Page
 
             var sensitivity = (float)Math.Clamp(ViewModel.OscilloscopeSensitivity, 0.5, 2.6);
             var peakDecay = (float)Math.Clamp(ViewModel.OscilloscopePeakDecay, 0.65, 0.99);
+            var effectiveResponsiveness = 1f - MathF.Pow(1f - responsiveness, frameScale);
+            var effectivePeakDecay = MathF.Pow(peakDecay, frameScale);
+            var agcDecay = MathF.Pow(0.996f, frameScale);
             var colorIntensity = Math.Clamp(ViewModel.OscilloscopeColorIntensity, 0, 1);
             var neutralBase = Color.FromArgb(255, 214, 214, 214);
             var whiteFlash = Color.FromArgb(255, 246, 246, 246);
@@ -4329,8 +4523,6 @@ public sealed partial class MainPage : Page
             var maxHalfHeight = Math.Max(1.2, Math.Min(VisualizerMaxAmplitude, centerY - 1.6));
             var minHalfHeight = Math.Min(maxHalfHeight, Math.Max(0.8, VisualizerMinAmplitude));
 
-            // Automatic gain: a slowly decaying running peak normalises quiet captures (low system
-            // volume, app-focus gating) so the spectrum always uses its full height.
             var frameMax = 0f;
             for (var i = 0; i < visualizerLevels.Length; i++)
             {
@@ -4341,7 +4533,7 @@ public sealed partial class MainPage : Page
                 }
             }
 
-            visualizerAgcPeak = Math.Max(frameMax, visualizerAgcPeak * 0.996f);
+            visualizerAgcPeak = Math.Max(frameMax, visualizerAgcPeak * agcDecay);
             var agcGain = Math.Clamp(0.85f / Math.Max(visualizerAgcPeak, 0.05f), 1f, 6f);
             if (visualizerDiagnosticsClock.Elapsed > TimeSpan.FromSeconds(10))
             {
@@ -4359,9 +4551,9 @@ public sealed partial class MainPage : Page
                 }
 
                 var previous = float.IsFinite(visualizerLevels[i]) ? visualizerLevels[i] : 0f;
-                var smoothed = previous + ((level - previous) * responsiveness);
+                var smoothed = previous + ((level - previous) * effectiveResponsiveness);
                 visualizerLevels[i] = smoothed;
-                visualizerPeakLevels[i] = Math.Max(smoothed, (float.IsFinite(visualizerPeakLevels[i]) ? visualizerPeakLevels[i] : 0f) * peakDecay);
+                visualizerPeakLevels[i] = Math.Max(smoothed, (float.IsFinite(visualizerPeakLevels[i]) ? visualizerPeakLevels[i] : 0f) * effectivePeakDecay);
             }
 
             _ = colorIntensity;
@@ -4466,7 +4658,8 @@ public sealed partial class MainPage : Page
     private readonly System.Diagnostics.Stopwatch visualizerDiagnosticsClock = System.Diagnostics.Stopwatch.StartNew();
     private float[] visualizerRatios = [];
 
-    /// <summary>Positions the spectrum inside the text lane, following the lyrics alignment.</summary>
+    private const double FixedVisualizerWidth = 420;
+
     private void PlaceSpectrumView(Canvas canvas)
     {
         if (spectrumView is null)
@@ -4479,7 +4672,7 @@ public sealed partial class MainPage : Page
         if (ReferenceEquals(canvas, LyricVisualizerCanvas))
         {
             var laneWidth = Math.Max(1, LyricVisualizerHost.ActualWidth);
-            width = Math.Clamp(laneWidth - (OverlayTextEdgePadding * 2), 160, 760);
+            width = Math.Clamp(FixedVisualizerWidth, 160, Math.Max(160, laneWidth - (OverlayTextEdgePadding * 2)));
             left = ResolveEffectiveLyricsTextAlignmentMode() switch
             {
                 LyricsTextAlignmentMode.Center => (laneWidth - width) / 2,
@@ -4489,10 +4682,15 @@ public sealed partial class MainPage : Page
         }
         else
         {
-            // Same container as the lyrics: one length at the start and at the end of a track.
             var lanes = GetLyricsHorizontalLayout();
-            width = Math.Max(160, lanes.TextLaneRight - lanes.TextLaneLeft);
-            left = lanes.TextLaneLeft;
+            var laneSpan = Math.Max(160, lanes.TextLaneRight - lanes.TextLaneLeft);
+            width = Math.Min(FixedVisualizerWidth, laneSpan);
+            left = lanes.Mode switch
+            {
+                LyricsTextAlignmentMode.Center => lanes.TextLaneLeft + ((laneSpan - width) * 0.5),
+                LyricsTextAlignmentMode.Right => lanes.TextLaneRight - width,
+                _ => lanes.TextLaneLeft
+            };
         }
 
         if (Math.Abs(spectrumView.Width - width) > 0.5 || double.IsNaN(spectrumView.Width))

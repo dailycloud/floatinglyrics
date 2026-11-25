@@ -41,6 +41,14 @@ public sealed partial class LiquidGlassSurface : Grid
     private readonly Stopwatch glintClock = new();
     private PixelShaderEffect? glassShader;
     private CanvasDevice? glassShaderDevice;
+    private CanvasGeometry? cachedShapeGeometry;
+    private CanvasGeometry? cachedOutsideGeometry;
+    private CanvasDevice? cachedGeometryDevice;
+    private float cachedGeoW;
+    private float cachedGeoH;
+    private float cachedGeoRadius;
+    private float cachedTotalW;
+    private float cachedTotalH;
     private float presence = 1;
     private bool isReleased;
 
@@ -193,6 +201,11 @@ public sealed partial class LiquidGlassSurface : Grid
         glassShader?.Dispose();
         glassShader = null;
         glassShaderDevice = null;
+        cachedShapeGeometry?.Dispose();
+        cachedShapeGeometry = null;
+        cachedOutsideGeometry?.Dispose();
+        cachedOutsideGeometry = null;
+        cachedGeometryDevice = null;
     }
 
     private PixelShaderEffect? GetShader(CanvasDevice device)
@@ -260,6 +273,33 @@ public sealed partial class LiquidGlassSurface : Grid
         }
     }
 
+    private void EnsureCachedGeometries(CanvasControl sender, Rect shape, float w, float h, float radius, float totalW, float totalH)
+    {
+        if (cachedShapeGeometry is not null &&
+            cachedOutsideGeometry is not null &&
+            ReferenceEquals(cachedGeometryDevice, sender.Device) &&
+            Math.Abs(cachedGeoW - w) < 0.01f &&
+            Math.Abs(cachedGeoH - h) < 0.01f &&
+            Math.Abs(cachedGeoRadius - radius) < 0.01f &&
+            Math.Abs(cachedTotalW - totalW) < 0.01f &&
+            Math.Abs(cachedTotalH - totalH) < 0.01f)
+        {
+            return;
+        }
+
+        cachedShapeGeometry?.Dispose();
+        cachedOutsideGeometry?.Dispose();
+        cachedShapeGeometry = CanvasGeometry.CreateRoundedRectangle(sender, shape, radius, radius);
+        using var bounds = CanvasGeometry.CreateRectangle(sender, 0, 0, totalW, totalH);
+        cachedOutsideGeometry = bounds.CombineWith(cachedShapeGeometry, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
+        cachedGeometryDevice = sender.Device;
+        cachedGeoW = w;
+        cachedGeoH = h;
+        cachedGeoRadius = radius;
+        cachedTotalW = totalW;
+        cachedTotalH = totalH;
+    }
+
     private void DrawGlass(CanvasControl sender, CanvasDrawingSession ds)
     {
         var p = Math.Clamp(Presence, 0f, 1.25f);
@@ -274,14 +314,18 @@ public sealed partial class LiquidGlassSurface : Grid
         var shape = new Rect(ShapeMargin, ShapeMargin, w, h);
         var radius = Math.Min(ShapeCornerRadius, Math.Min(w, h) / 2f);
         var specular = Math.Clamp(Specular, 0f, 1f);
+        var totalW = (float)Math.Max(1, Width);
+        var totalH = (float)Math.Max(1, Height);
 
-        using var geometry = CanvasGeometry.CreateRoundedRectangle(sender, shape, radius, radius);
+        EnsureCachedGeometries(sender, shape, w, h, radius, totalW, totalH);
+        var geometry = cachedShapeGeometry!;
+        var outside = cachedOutsideGeometry!;
 
         // The backdrop is an exact copy of the wallpaper, so the glass is invisible at p≈0 even
         // at full opacity; the quick opacity ramp only hides sub-pixel resampling differences.
         using var layer = ds.CreateLayer(SmoothStep(0f, 0.12f, p));
 
-        DrawShadow(sender, ds, geometry, visibility);
+        DrawShadow(sender, ds, geometry, outside, visibility);
         DrawOptics(sender, ds, shape, radius, p, visibility);
 
         using (ds.CreateLayer(1f, geometry))
@@ -308,7 +352,7 @@ public sealed partial class LiquidGlassSurface : Grid
         DrawRim(sender, ds, shape, radius, specular * visibility);
     }
 
-    private void DrawShadow(CanvasControl sender, CanvasDrawingSession ds, CanvasGeometry geometry, float visibility)
+    private void DrawShadow(CanvasControl sender, CanvasDrawingSession ds, CanvasGeometry geometry, CanvasGeometry outside, float visibility)
     {
         if (ShadowOpacity <= 0.001f)
         {
@@ -325,9 +369,6 @@ public sealed partial class LiquidGlassSurface : Grid
         using var broad = new ShadowEffect { Source = silhouette, BlurAmount = 18f * (0.4f + (0.6f * visibility)), ShadowColor = Color.FromArgb(alpha, 0, 0, 0) };
         using var contact = new ShadowEffect { Source = silhouette, BlurAmount = 4f, ShadowColor = Color.FromArgb((byte)(alpha * 0.45f), 0, 0, 0) };
 
-        // The shadow must not darken the glass itself: draw it outside the shape only.
-        using var bounds = CanvasGeometry.CreateRectangle(sender, 0, 0, (float)Width, (float)Height);
-        using var outside = bounds.CombineWith(geometry, Matrix3x2.Identity, CanvasGeometryCombine.Exclude);
         using (ds.CreateLayer(1f, outside))
         {
             ds.DrawImage(broad, 0, 12f * visibility);
@@ -372,7 +413,7 @@ public sealed partial class LiquidGlassSurface : Grid
             Source = aligned,
             BlurAmount = Math.Max(0.01f, Math.Max(0f, Blur) * visibility),
             BorderMode = EffectBorderMode.Hard,
-            Optimization = EffectOptimization.Balanced
+            Optimization = EffectOptimization.Speed
         };
         using var frosted = new ColorMatrixEffect
         {

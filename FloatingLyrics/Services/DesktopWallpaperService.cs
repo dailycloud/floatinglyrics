@@ -20,6 +20,9 @@ public sealed class DesktopWallpaperService
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(3);
 
     private readonly Dictionary<string, (DateTime WriteTime, CanvasBitmap Bitmap)> imageCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly WallpaperHookBridge liveCapture = new();
+    private CanvasBitmap? staticBitmap;
+    private PointInt32 staticOrigin;
     private DispatcherQueueTimer? pollTimer;
     private DispatcherQueue? activeDispatcherQueue;
     private Func<RectInt32?>? hostRectProvider;
@@ -31,16 +34,14 @@ public sealed class DesktopWallpaperService
 
     public static DesktopWallpaperService Instance { get; } = new();
 
-    /// <summary>Composite wallpaper at 96 DPI: one bitmap unit equals one physical pixel of the host.</summary>
-    public CanvasBitmap? Bitmap { get; private set; }
+    public CanvasBitmap? Bitmap => liveCapture.LiveBitmap ?? staticBitmap;
 
-    /// <summary>Screen position (physical px) of the composite bitmap's top-left corner.</summary>
-    public PointInt32 Origin { get; private set; }
+    public PointInt32 Origin => liveCapture.LiveBitmap is not null ? liveCapture.LiveOrigin : staticOrigin;
 
-    /// <summary>Average colour of the wallpaper; used as a fallback tint and for UI accents.</summary>
     public Color AverageColor { get; private set; } = Color.FromArgb(255, 40, 48, 64);
 
     public event EventHandler? Changed;
+    public event EventHandler? LiveFrameChanged;
 
     /// <summary>A real screen capture of the wallpaper behind the widget (Wallpaper Engine).</summary>
     private sealed record LivePatch(CanvasBitmap Bitmap, RectInt32 ScreenRect, Color Average, string EngineKey, bool Complete);
@@ -91,14 +92,26 @@ public sealed class DesktopWallpaperService
         inner.X + inner.Width <= outer.X + outer.Width &&
         inner.Y + inner.Height <= outer.Y + outer.Height;
 
-    public void Start(DispatcherQueue dispatcherQueue, Func<RectInt32?> getHostScreenRect)
+    public void Start(DispatcherQueue dispatcherQueue, Func<RectInt32?> getHostScreenRect, nint hostHwnd = 0)
     {
         activeDispatcherQueue = dispatcherQueue;
         hostRectProvider = getHostScreenRect;
         if (!isSubscribedToEngineFrames)
         {
             WallpaperEngineSource.FrameReady += OnEngineFrameReady;
+            liveCapture.FrameUpdated += OnLiveFrameUpdated;
             isSubscribedToEngineFrames = true;
+        }
+
+        if (hostHwnd != 0)
+        {
+            dispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+            {
+                if (activeDispatcherQueue is not null)
+                {
+                    liveCapture.Start(dispatcherQueue);
+                }
+            });
         }
 
         if (pollTimer is null)
@@ -118,8 +131,11 @@ public sealed class DesktopWallpaperService
         if (isSubscribedToEngineFrames)
         {
             WallpaperEngineSource.FrameReady -= OnEngineFrameReady;
+            liveCapture.FrameUpdated -= OnLiveFrameUpdated;
             isSubscribedToEngineFrames = false;
         }
+
+        liveCapture.Stop();
 
         if (pollTimer is not null)
         {
@@ -135,6 +151,16 @@ public sealed class DesktopWallpaperService
         DisposeCachedBitmaps();
     }
 
+    public void SetLiveCaptureActive(bool active)
+    {
+        liveCapture.SetEnabled(active);
+    }
+
+    private void OnLiveFrameUpdated()
+    {
+        LiveFrameChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     private void OnEngineFrameReady()
     {
         activeDispatcherQueue?.TryEnqueue(() => RequestRefresh(force: true));
@@ -142,6 +168,7 @@ public sealed class DesktopWallpaperService
 
     private void OnPollTimerTick(DispatcherQueueTimer sender, object args)
     {
+        liveCapture.EnsureConnected();
         RequestRefresh(force: false);
     }
 
@@ -156,7 +183,7 @@ public sealed class DesktopWallpaperService
         livePatch?.Bitmap.Dispose();
         livePatch = null;
         Bitmap?.Dispose();
-        Bitmap = null;
+        staticBitmap = null;
     }
 
     public void RequestRefresh(bool force)
@@ -377,11 +404,11 @@ public sealed class DesktopWallpaperService
                 }
             }
 
-            var previous = Bitmap;
-            Bitmap = target;
+            var previous = staticBitmap;
+            staticBitmap = target;
             target = null;
-            Origin = new PointInt32(layout.Host.X, layout.Host.Y);
-            AverageColor = ComputeAverageColor(Bitmap, layout.BackgroundColor);
+            staticOrigin = new PointInt32(layout.Host.X, layout.Host.Y);
+            AverageColor = ComputeAverageColor(staticBitmap, layout.BackgroundColor);
             if (previous is not null && !imageCache.Values.Any(v => ReferenceEquals(v.Bitmap, previous)))
             {
                 previous.Dispose();

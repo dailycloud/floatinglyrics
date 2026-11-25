@@ -17,9 +17,9 @@
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <ImplicitUsings>enable</ImplicitUsings>
         <RootNamespace>FloatingLyrics</RootNamespace>
-        <Version>1.2.4</Version>
-        <AssemblyVersion>1.2.4.0</AssemblyVersion>
-        <FileVersion>1.2.4.0</FileVersion>
+        <Version>1.2.5</Version>
+        <AssemblyVersion>1.2.5.0</AssemblyVersion>
+        <FileVersion>1.2.5.0</FileVersion>
 
 
         <!-- App Options -->
@@ -35,6 +35,8 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <Content Include="WallpaperHook.dll" Condition="Exists('WallpaperHook.dll')" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="ImGuiNotify.dll" Condition="Exists('ImGuiNotify.dll')" CopyToOutputDirectory="PreserveNewest" />
         <Content Update="Assets\AppIcon.ico" Condition="Exists('Assets\\AppIcon.ico')" CopyToOutputDirectory="PreserveNewest" />
         <Content Include="Assets\SplashScreen.scale-200.png" />
         <Content Include="Assets\LockScreenLogo.scale-200.png" />

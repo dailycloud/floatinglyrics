@@ -63,6 +63,8 @@ public sealed partial class MainPage
     private bool isAnchorAnimating;
     private bool isDragPending;
     private Point dragPressPointInRoot;
+    private bool nativeImGuiNotifyShown;
+    private string nativeImGuiNotifyVersion = string.Empty;
     private Rect panelRectInRoot;
     private Storyboard? settingsPageStoryboard;
     private Storyboard? anchorStoryboard;
@@ -117,7 +119,8 @@ public sealed partial class MainPage
 
         RefreshWindowOrigin();
         DesktopWallpaperService.Instance.Changed += OnWallpaperChanged;
-        DesktopWallpaperService.Instance.Start(DispatcherQueue, GetHostScreenRect);
+        DesktopWallpaperService.Instance.LiveFrameChanged += OnWallpaperLiveFrameChanged;
+        DesktopWallpaperService.Instance.Start(DispatcherQueue, GetHostScreenRect, hwnd);
 
         WidgetToolbarButtons.RenderTransform = toolbarButtonsScale;
         toolbarButtonsScale.CenterX = 80;
@@ -142,6 +145,15 @@ public sealed partial class MainPage
         plateH.Snap(initialRect.Height);
         platePresence.Snap(ViewModel.GlassVisibility == GlassVisibilityMode.Always ? 1 : 0);
         glassInitialized = true;
+        NativeImGuiNotifyBridge.Initialize(
+            () => _ = DispatcherQueue.TryEnqueue(() => _ = ViewModel.TriggerUpdateFromNotificationAsync()),
+            () => _ = DispatcherQueue.TryEnqueue(() =>
+            {
+                nativeImGuiNotifyShown = false;
+                ViewModel.DismissUpdateNotification();
+            }));
+
+        SyncNativeImGuiNotification();
         ApplyGlassVisuals();
         EnsureGlassRenderLoop();
     }
@@ -156,6 +168,7 @@ public sealed partial class MainPage
         glassInitialized = false;
         StopGlassRenderLoop();
         DesktopWallpaperService.Instance.Changed -= OnWallpaperChanged;
+        DesktopWallpaperService.Instance.LiveFrameChanged -= OnWallpaperLiveFrameChanged;
         DesktopWallpaperService.Instance.Stop();
         if (XamlRoot is not null)
         {
@@ -168,6 +181,9 @@ public sealed partial class MainPage
             desktopWatchdogTimer.Tick -= OnDesktopWatchdogTick;
             desktopWatchdogTimer = null;
         }
+
+        nativeImGuiNotifyShown = false;
+        NativeImGuiNotifyBridge.Shutdown();
 
         StopSettingsPageStoryboard();
         StopAnchorStoryboard();
@@ -318,6 +334,8 @@ public sealed partial class MainPage
 
         // While the menu is open the widget stays above the icon layer (a click elsewhere on the
         // desktop dismisses the menu, like a regular light-dismiss popup).
+        SyncNativeImGuiNotification();
+
         var interactive = isDraggingWindow || overWidget || overPanel || isSettingsPanelOpen || panelPresence.Value > 0.02;
         SetWindowClickThrough(!interactive);
 
@@ -954,8 +972,20 @@ public sealed partial class MainPage
         }
     }
 
+    private void CommitPendingDragOffset()
+    {
+        if (!hasPendingDragOffset)
+        {
+            return;
+        }
+
+        hasPendingDragOffset = false;
+        ApplyOverlayRootOffset(pendingDragOffset, persist: false);
+    }
+
     private void OnGlassFrameCore(object e)
     {
+        CommitPendingDragOffset();
         var renderingTime = e is RenderingEventArgs args ? args.RenderingTime : TimeSpan.Zero;
         var dt = lastGlassFrameTime == TimeSpan.Zero
             ? 1.0 / 60.0
@@ -1072,6 +1102,28 @@ public sealed partial class MainPage
 
         ApplyToolbarVisuals(plate);
         ApplySettingsPanelVisuals();
+        DesktopWallpaperService.Instance.SetLiveCaptureActive(
+            GlassPlate.Visibility == Visibility.Visible ||
+            WidgetToolbar.Visibility == Visibility.Visible ||
+            SettingsPanel.Visibility == Visibility.Visible);
+    }
+
+    private void OnWallpaperLiveFrameChanged(object? sender, EventArgs e)
+    {
+        if (GlassPlate.Visibility == Visibility.Visible)
+        {
+            GlassPlate.Invalidate();
+        }
+
+        if (WidgetToolbar.Visibility == Visibility.Visible)
+        {
+            ToolbarGlass.Invalidate();
+        }
+
+        if (SettingsPanel.Visibility == Visibility.Visible)
+        {
+            SettingsGlass.Invalidate();
+        }
     }
 
     private void ApplyToolbarVisuals(Rect plate)
@@ -1095,6 +1147,8 @@ public sealed partial class MainPage
 
         Canvas.SetLeft(WidgetToolbar, x);
         Canvas.SetTop(WidgetToolbar, y);
+        WidgetToolbar.Width = size.Width;
+        WidgetToolbar.Height = size.Height;
         var visibility = Math.Clamp(presence, 0, 1);
         WidgetToolbarButtons.Opacity = visibility;
         toolbarButtonsScale.CenterX = size.Width / 2;
@@ -1304,13 +1358,13 @@ public sealed partial class MainPage
 
     private Size GetToolbarSize()
     {
-        var w = WidgetToolbarButtons.ActualWidth;
-        var h = WidgetToolbarButtons.ActualHeight;
+        WidgetToolbarButtons.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var w = WidgetToolbarButtons.DesiredSize.Width;
+        var h = WidgetToolbarButtons.DesiredSize.Height;
         if (w < 1 || h < 1)
         {
-            WidgetToolbarButtons.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            w = WidgetToolbarButtons.DesiredSize.Width;
-            h = WidgetToolbarButtons.DesiredSize.Height;
+            w = WidgetToolbarButtons.ActualWidth;
+            h = WidgetToolbarButtons.ActualHeight;
         }
 
         return new Size(Math.Max(40, w), Math.Max(40, h));
@@ -1330,15 +1384,12 @@ public sealed partial class MainPage
 
     private Rect OverlayRectToRoot(Rect rect)
     {
-        try
-        {
-            var origin = OverlayRootHost.TransformToVisual(RootGrid).TransformPoint(new Point(rect.X, rect.Y));
-            return new Rect(origin.X, origin.Y, rect.Width, rect.Height);
-        }
-        catch
-        {
-            return rect;
-        }
+        var margin = OverlayRootHost.Margin;
+        return new Rect(
+            margin.Left + OverlayRootHostTranslate.X + rect.X,
+            margin.Top + OverlayRootHostTranslate.Y + rect.Y,
+            rect.Width,
+            rect.Height);
     }
 
     private Point ScreenToRoot(int x, int y)
@@ -1450,6 +1501,28 @@ public sealed partial class MainPage
     }
 
     // ------------------------------------------------------------------ interop
+
+    private void SyncNativeImGuiNotification()
+    {
+        if (!ViewModel.ShouldShowUpdateNotification)
+        {
+            if (nativeImGuiNotifyShown)
+            {
+                nativeImGuiNotifyShown = false;
+                NativeImGuiNotifyBridge.Hide();
+            }
+
+            return;
+        }
+
+        var version = ViewModel.AvailableUpdateVersion;
+        if (!nativeImGuiNotifyShown || !string.Equals(nativeImGuiNotifyVersion, version, StringComparison.Ordinal))
+        {
+            nativeImGuiNotifyShown = true;
+            nativeImGuiNotifyVersion = version;
+            NativeImGuiNotifyBridge.Show(version);
+        }
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct GlassNativeRect

@@ -51,6 +51,56 @@ internal static class TrackQueryNormalization
         @"\s+",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    private static readonly Regex TopicSuffixRegex = new(
+        @"\s*[-–—]\s*topics?\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static readonly HashSet<string> ExcludedArtists = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "dj",
+        "dj x",
+        "ai dj",
+        "spotify",
+        "spotify dj"
+    };
+
+    private static readonly HashSet<string> ExcludedTitles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "dj x",
+        "ai dj",
+        "spotify dj"
+    };
+
+    public static bool ShouldSkipLyricsSearch(TrackInfo track)
+    {
+        var artist = NormalizeSpace(track.Artist);
+        var title = NormalizeSpace(track.Title);
+
+        if (ExcludedArtists.Contains(artist))
+        {
+            return true;
+        }
+
+        if (ExcludedTitles.Contains(title))
+        {
+            return true;
+        }
+
+        return title.StartsWith("dj x - ", StringComparison.OrdinalIgnoreCase) ||
+               title.StartsWith("dj x:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string StripArtistTopicSuffix(string value)
+    {
+        var normalized = NormalizeSpace(value);
+        if (normalized.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        return NormalizeSpace(TopicSuffixRegex.Replace(normalized, string.Empty));
+    }
+
     public static IReadOnlyList<LyricsQueryCandidate> BuildCandidates(TrackInfo track)
     {
         var rawTitle = NormalizeSpace(track.Title);
@@ -141,7 +191,7 @@ internal static class TrackQueryNormalization
 
     private static string CleanArtist(string value)
     {
-        var cleaned = NormalizeSpace(value);
+        var cleaned = StripArtistTopicSuffix(value);
         cleaned = RemoveMarkers(cleaned, NoiseMarkers);
         cleaned = TrimOuterSeparators(cleaned);
         return NormalizeSpace(cleaned);
