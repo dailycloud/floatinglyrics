@@ -310,7 +310,14 @@ public sealed partial class MainPage
 
         var plateInRoot = OverlayRectToRoot(CurrentPlateRect());
         var hoverRect = Inflate(plateInRoot, HoverInflate);
-        var overWidget = desktopVisible && (Contains(hoverRect, cursorInRoot) || Contains(GetToolbarRectInRoot(), cursorInRoot));
+        var grabberRect = new Rect(
+            plateInRoot.X + Math.Max(0, (plateInRoot.Width - 104) * 0.5),
+            plateInRoot.Y - 4,
+            Math.Min(plateInRoot.Width, 104),
+            28);
+        var overGrabber = desktopVisible && Contains(grabberRect, cursorInRoot);
+        var overToolbar = desktopVisible && Contains(GetToolbarRectInRoot(), cursorInRoot);
+        var overWidget = desktopVisible && (Contains(hoverRect, cursorInRoot) || overToolbar);
         var overPanel = desktopVisible && isSettingsPanelOpen && Contains(panelRectInRoot, cursorInRoot);
 
         if (overWidget || isDraggingWindow)
@@ -336,7 +343,7 @@ public sealed partial class MainPage
         // desktop dismisses the menu, like a regular light-dismiss popup).
         SyncNativeImGuiNotification();
 
-        var interactive = isDraggingWindow || overWidget || overPanel || isSettingsPanelOpen || panelPresence.Value > 0.02;
+        var interactive = isDragPending || isDraggingWindow || overGrabber || overToolbar || overPanel || isSettingsPanelOpen || panelPresence.Value > 0.02;
         SetWindowClickThrough(!interactive);
 
         var lightEnabled = ViewModel.GlassCursorLight;
